@@ -19,8 +19,12 @@ Tested: MTP, GPhoto2 (PIP), DAV, SFTP, FTP. You may need to unlock and turn scre
 By default, `mount` only shows list of devices which has MTP, GPhoto2, AFC, AFP protocols.
 To mount other protocols, you need to install corresponding packages and mount them manually.
 
-NOTE: If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>),
-and then create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
+NOTE:
+
+- If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>),
+  and then create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
+
+- Trash won't work on some protocols, use permanently delete instead.
 
 ## Features
 

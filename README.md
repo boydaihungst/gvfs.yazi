@@ -14,7 +14,7 @@ allowing you to navigate inside, view, and edit individual or groups of files.
 
 Supported protocols: MTP, SMB, SFTP, NFS, GPhoto2 (PIP), FTP, Google Drive, DNS-SD, DAV (WebDAV), AFP, AFC.
 
-Tested: MTP, GPhoto2 (PIP), DAV, SFTP, FTP
+Tested: MTP, GPhoto2 (PIP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` only shows list of devices which has MTP, GPhoto2, AFC, AFP protocols.
 To mount other protocols, you need to install corresponding packages and mount them manually.

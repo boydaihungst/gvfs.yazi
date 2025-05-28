@@ -58,7 +58,7 @@ NOTE:
 
    ```sh
    # Ubuntu
-   sudo apt install gvfs-backends gvfs-libs gvfs-bin
+   sudo apt install gvfs-backends gvfs-libs
 
    # Fedora
    sudo dnf install gvfs-mtp gvfs-archive gvfs-goa gvfs-gphoto2 gvfs-smb gvfs-afc gvfs-dnssd

@@ -1,22 +1,32 @@
 --- @since 25.5.28
 
 local M = {}
+local shell = os.getenv("SHELL") or ""
 local home = os.getenv("HOME") or ""
-local PLUGIN_NAME = "gvfs-mtp"
+local PLUGIN_NAME = "gvfs"
 
 local GVFS_ROOT_MOUNTPOINT = "/run/user/" .. tostring(ya.uid()) .. "/gvfs"
 
 ---@enum NOTIFY_MSG
 local NOTIFY_MSG = {
+	CANT_CREATE_SAVE_FOLDER = "Can't create save folder: %s",
+	CANT_SAVE_DEVICES = "Can't write to save file: %s",
 	CMD_NOT_FOUND = "%s not found. Make sure it is installed.",
 	MOUNT_SUCCESS = "Mounted device %s",
-	MOUNT_ERROR = "Error: %s",
+	MOUNT_ERROR = "Mount error: %s",
 	UNMOUNT_ERROR = "Device is busy",
 	UNMOUNT_SUCCESS = "Unmounted device %s",
 	EJECT_SUCCESS = "Ejected device %s, it can safely be removed",
 	LIST_DEVICES_EMPTY = "No devices found.",
 	DEVICE_IS_DISCONNECTED = "Device is disconnected",
 	CANT_ACCESS_PREV_CWD = "Device is disconnected or Previous directory is removed",
+	URI_CANT_BE_EMPTY = "URI can't be empty",
+	URI_IS_INVALID = "URI is invalid",
+	UNSUPPORTED_SCHEME = "Unsupported scheme %s",
+	DISPLAY_NAME_CANT_BE_EMPTY = "Display name can't be empty",
+	MOUNT_ERROR_PASSWORD = "Failed to mount device %s, please check your password",
+	MOUNT_ERROR_USERNAME = "Failed to mount device %s, please check your username",
+	LIST_MOUNTS_EMPTY = "List mounts is empty",
 }
 
 ---@enum DEVICE_CONNECT_STATUS
@@ -25,23 +35,22 @@ local DEVICE_CONNECT_STATUS = {
 	NOT_MOUNTED = 2,
 }
 
----@enum DEVICE_TYPE
-local DEVICE_TYPE = {
-	VOLUME = 1,
-	MOUNT = 10,
-}
-
----@enum SCHEMA
-local SCHEMA = {
+---@enum SCHEME
+local SCHEME = {
 	MTP = "mtp",
 	SMB = "smb",
 	SFTP = "sftp",
 	NFS = "nfs",
 	GPHOTO2 = "gphoto2",
 	FTP = "ftp",
+	FTPS = "ftps",
+	FTPIS = "ftpis",
 	GOOGLE_DRIVE = "google-drive",
 	DNS_SD = "dns-sd",
 	DAV = "dav",
+	DAVS = "davs",
+	DAVSD = "dav+sd",
+	DAVSSD = "davs+sd",
 	AFP = "afp",
 	AFC = "afc",
 }
@@ -51,6 +60,8 @@ local STATE_KEY = {
 	WHICH_KEYS = "WHICH_KEYS",
 	CMD_NOT_FOUND = "CMD_NOT_FOUND",
 	ROOT_MOUNTPOINT = "ROOT_MOUNTPOINT",
+	SAVE_PATH = "SAVE_PATH",
+	MOUNTS = "MOUNTS",
 }
 
 ---@enum ACTION
@@ -60,32 +71,50 @@ local ACTION = {
 	JUMP_BACK_PREV_CWD = "jump-back-prev-cwd",
 	SELECT_THEN_UNMOUNT = "select-then-unmount",
 	REMOUNT_KEEP_CWD_UNCHANGED = "remount-current-cwd-device",
+	ADD_MOUNT = "add-mount",
+	EDIT_MOUNT = "edit-mount",
+	REMOVE_MOUNT = "remove-mount",
 }
 
 ---@class (exact) Device
 ---@field name string
 ---@field mounts Mount[]
----@field type DEVICE_TYPE
----@field schema SCHEMA
+---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
----@field activation_root string
+---@field activation_root string?
 ---@field uri string
+---@field is_manually_added boolean?
 ---@field can_unmount "1"|"0"
 ---@field can_eject "1"|"0"
 ---@field should_automount "1"|"0"
+---@field password string?
 
 ---@class (exact) Mount
 ---@field name string
 ---@field uri string
----@field type DEVICE_TYPE
----@field schema SCHEMA
+---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
----@field default_location string
----@field can_unmount "1"|"0"
----@field can_eject "1"|"0"
----@field is_shadowed "1"|"0"
+---@field default_location string?
+---@field can_unmount "1"|"0"|nil
+---@field can_eject "1"|"0"|nil
+---@field is_shadowed "1"|"0"|nil
+---@field password string?
+
+---@param is_password boolean?
+local function show_input(title, is_password, value)
+	local input_value, input_pw_event = ya.input({
+		title = title,
+		value = value or "",
+		obscure = is_password or false,
+		position = { "top-center", y = 3, w = 40 },
+	})
+	if input_pw_event ~= 1 then
+		return nil, nil
+	end
+	return input_value, input_pw_event
+end
 
 local function error(s, ...)
 	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 5, level = "error" })
@@ -124,6 +153,20 @@ end
 
 local current_dir = ya.sync(function()
 	return tostring(cx.active.current.cwd)
+end)
+
+---@enum PUBSUB_KIND
+local PUBSUB_KIND = {
+	mounts_changed = "@" .. PLUGIN_NAME .. "-" .. "mounts-changed",
+}
+
+--- broadcast through pub sub to other instances
+---@param _ table state
+---@param pubsub_kind PUBSUB_KIND
+---@param data any
+---@param to number default = 0 to all instances
+local broadcast = ya.sync(function(_, pubsub_kind, data, to)
+	ps.pub_to(to or 0, pubsub_kind, data)
 end)
 
 ---run any command
@@ -182,45 +225,96 @@ local function tbl_deep_clone(original)
 	return copy
 end
 
-local function extract_domain_and_user(s)
+local function path_quote(path)
+	if not path or path == "" then
+		return path
+	end
+	local result = "'" .. string.gsub(tostring(path), "'", "'\\''") .. "'"
+	return result
+end
+
+local function extract_domain_user_from_uri(s)
 	local user = ""
 	local domain = ""
+	local port = ""
 
-	-- Attempt 1: Look for user@domain first (if it exists)
-	local temp_user, temp_domain_part = s:match("^([^@,/]+)@([^,/]+)")
+	-- Attempt 1: Look for user@domain:port first (if it exists)
+	-- davs://user@domain/dav
+	local scheme, temp_user, temp_domain_part = s:match("^([^:]+)://([^@/]+)@([^/]+)")
 	if temp_user and temp_domain_part then
 		-- If user@domain found, the domain might be followed by a comma
 		-- We want the part before the first comma or slash in the domain part
-		domain = temp_domain_part:match("^[^,/]+") or temp_domain_part
 		user = temp_user
+		-- domain:port
+		domain, port = temp_domain_part:match("^([^:/]+):([^:/]+)")
+		if not port or port == "" then
+			port = ""
+			domain = temp_domain_part:match("^[^/]+") or temp_domain_part
+		end
 	else
 		-- Attempt 2: No user@domain, so try to get domain from the start (before first comma or slash)
-		domain = s:match("^([^,/]+)")
-		if not domain then
-			domain = "" -- Ensure domain is not nil if no pattern matches
+		-- davs://domain/dav
+		scheme, temp_domain_part = s:match("^([^:]+)://([^/]+)")
+		if temp_domain_part then
+			domain, port = temp_domain_part:match("^([^:/]+):([^:/]+)")
+			if not port or port == "" then
+				port = ""
+				domain = temp_domain_part:match("^[^/]+") or temp_domain_part
+			end
 		end
 	end
 
-	-- Now, regardless of how the domain was found, look for 'user='
-	-- Match 'user=' followed by one or more characters that are not a comma
-	-- This handles 'user=value,' or 'user=value' at the end of the string
-	local user_match = s:match("user=([^,]+)")
-	if user_match then
-		user = user_match -- Overwrite or set the user found later
-	end
+	local ssl = (s:match("^davs") or s:match("^ftps") or s:match("^ftpis") or s:match("^https")) and true or false
+	local prefix = s:match(".*" .. domain .. (port ~= "" and ":" .. port or "") .. "/(.+)$") or ""
+	return scheme, domain, user, ssl, prefix, port
+end
 
-	return domain, user
+local function uri_decode(str)
+	if not str then
+		return nil
+	end
+	str = string.gsub(str, "+", " ")
+	str = string.gsub(str, "%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end)
+	return str
+end
+
+local function extract_domain_user_from_foldername(s)
+	local user = ""
+	local domain = ""
+	local ssl = false
+	local prefix = ""
+	local scheme
+	local port
+	scheme, s = s:match("^([^:]+):(.+)")
+
+	for part in s:gmatch("([^,]+)") do
+		if part:match("^host=(.+)") then
+			domain = part:match("^host=([^,/]+)")
+		end
+	end
+	domain = uri_decode(s:match("^host=([^,]+)")) or ""
+	user = uri_decode(s:match(".*user=([^,]+)")) or ""
+	ssl = s:match(".*ssl=true") and true or false
+	prefix = uri_decode(s:match(".*prefix=([^,]+)")) or ""
+	port = s:match(".*port=([^,]+)") or ""
+	if prefix then
+		prefix = prefix:match("/(.+)") or ""
+	end
+	return scheme, domain, user, ssl, prefix, port
 end
 
 local function is_mountpoint_belong_to_volume(mount, volume)
 	return mount.is_shadowed ~= "1"
-		and mount.schema == volume.schema
+		and mount.scheme == volume.scheme
 		and (mount.uri == volume.uri or (mount.bus == volume.bus and mount.device == volume.device))
 end
 
 local function parse_devices(raw_input)
 	local volumes = {}
 	local mounts = {}
+	local predefined_mounts = tbl_deep_clone(get_state(STATE_KEY.MOUNTS)) or {}
 	local current_volume = nil
 	local current_mount = nil
 
@@ -231,22 +325,38 @@ local function parse_devices(raw_input)
 		local volume_name = clean_line:match("^Volume%(%d+%):%s*(.+)$")
 		if volume_name then
 			current_mount = nil
-			current_volume = { name = volume_name, mounts = {}, type = DEVICE_TYPE.VOLUME }
+			current_volume = { name = volume_name, mounts = {} }
 			table.insert(volumes, current_volume)
 
 		-- Match mount(0)
 		elseif clean_line:match("^Mount%(%d+%):") then
 			current_volume = nil
+			current_mount = nil
 			local mount_name, mount_uri = clean_line:match("^Mount%(%d+%):%s*(.-)%s*->%s*(.+)$")
 			if not mount_name then
 				mount_name = clean_line:match("^Mount%(%d+%):%s*(.+)$")
 			end
 
-			current_mount = { name = mount_name or "", uri = mount_uri or "", type = DEVICE_TYPE.MOUNT }
+			current_mount = { name = mount_name or "", uri = mount_uri or "" }
 
-			for _, value in pairs(SCHEMA) do
-				if mount_uri:match("^" .. value) then
-					current_mount.schema = value
+			local m_scheme, m_domain, m_user, m_ssl, m_prefix, m_port = extract_domain_user_from_uri(mount_uri)
+			for m = #predefined_mounts, 1, -1 do
+				local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(predefined_mounts[m].uri)
+				if
+					m_scheme == scheme
+					and m_domain == domain
+					and m_user == user
+					and m_ssl == ssl
+					and m_prefix == prefix
+					and m_port == port
+				then
+					current_mount = table.remove(predefined_mounts, m)
+				end
+			end
+
+			for _, value in pairs(SCHEME) do
+				if mount_uri:match("^" .. value .. ":") then
+					current_mount.scheme = value
 				end
 			end
 
@@ -254,7 +364,7 @@ local function parse_devices(raw_input)
 			if mount_uri then
 				local protocol, bus, device = mount_uri:match("^(%w+)://%[usb:(%d+),(%d+)%]/")
 				-- Attach to mount or volume
-				if protocol and (protocol == SCHEMA.MTP or protocol == SCHEMA.GPHOTO2) and bus and device then
+				if protocol and (protocol == SCHEME.MTP or protocol == SCHEME.GPHOTO2) and bus and device then
 					current_mount.bus = bus
 					current_mount.device = device
 				end
@@ -290,20 +400,24 @@ local function parse_devices(raw_input)
 		if v.activation_root then
 			v.uri = v.activation_root
 		end
-		-- Attach schema to volume
-		for _, value in pairs(SCHEMA) do
-			if v.uri:match("^" .. value) then
-				v.schema = value
+		-- Attach scheme to volume
+		for _, value in pairs(SCHEME) do
+			if v.uri:match("^" .. value .. ":") then
+				v.scheme = value
 			end
 		end
 
 		-- Attach mount points to volume
 		for j = #mounts, 1, -1 do
 			if is_mountpoint_belong_to_volume(mounts[j], v) then
-				table.insert(v.mounts, mounts[j])
-				table.remove(mounts, j)
+				table.insert(v.mounts, table.remove(mounts, j))
 			end
 		end
+	end
+
+	for _, m in ipairs(predefined_mounts) do
+		m.mounts = { tbl_deep_clone(m) }
+		table.insert(volumes, m)
 	end
 
 	for _, m in ipairs(mounts) do
@@ -323,25 +437,32 @@ local function get_mount_path(target)
 	end
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	if
-		target.schema == SCHEMA.DAV
-		or target.schema == SCHEMA.AFP
-		or target.schema == SCHEMA.GOOGLE_DRIVE
-		or target.schema == SCHEMA.NFS
-		or target.schema == SCHEMA.SFTP
-		or target.schema == SCHEMA.SMB
-		or target.schema == SCHEMA.DNS_SD
+		target.scheme == SCHEME.DAV
+		or target.scheme == SCHEME.AFP
+		or target.scheme == SCHEME.DAVS
+		or target.scheme == SCHEME.DAVSD
+		or target.scheme == SCHEME.DAVSSD
+		or target.scheme == SCHEME.FTP
+		or target.scheme == SCHEME.FTPS
+		or target.scheme == SCHEME.FTPIS
+		or target.scheme == SCHEME.GOOGLE_DRIVE
+		or target.scheme == SCHEME.NFS
+		or target.scheme == SCHEME.SFTP
+		or target.scheme == SCHEME.SMB
+		or target.scheme == SCHEME.DNS_SD
 	then
-		local schema, uri = string.match(target.uri, "([^:]+)://([^/]+)")
-		if not uri or not schema then
-			return ""
-		end
-
-		local domain, user = extract_domain_and_user(uri)
-		uri = is_literal_string(target.schema .. ":host=" .. (user and (user .. "@") or "") .. domain)
-		local uri2 = is_literal_string(target.schema .. ":host=" .. domain)
+		local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(target.uri)
 		local files, _ = fs.read_dir(Url(root_mountpoint), {})
 		for _, file in ipairs(files or {}) do
-			if file.name:match("^" .. uri .. ".*") or file.name:match("^" .. uri2 .. ".*") then
+			local f_scheme, f_domain, f_user, f_ssl, f_prefix, f_port = extract_domain_user_from_foldername(file.name)
+			if
+				scheme:match("^" .. f_scheme)
+				and f_domain == domain
+				and f_user == user
+				and f_ssl == ssl
+				and f_prefix == prefix
+				and f_port == port
+			then
 				return tostring(file.url)
 			end
 		end
@@ -354,34 +475,95 @@ end
 
 ---@param device Device
 local function is_mounted(device)
-	return device and (#device.mounts > 0 or fs.cha(Url(get_mount_path(device))))
+	if device and #device.mounts > 0 then
+		for _, mount in ipairs(device.mounts) do
+			if mount.can_unmount == "1" or mount.can_eject == "1" then
+				return true
+			end
+		end
+	end
+	local mountpath = get_mount_path(device)
+	return mountpath and mountpath ~= "" and fs.cha(Url(mountpath))
 end
 
 ---mount mtp device
----@param opts {device: Device, max_retry?: integer, retries?: integer}
+---@param opts {device: Device,username?:string, password?: string, max_retry?: integer, retries?: integer}
 ---@return boolean
 local function mount_device(opts)
 	local device = opts.device
 	local max_retry = opts.max_retry or 3
 	local retries = opts.retries or 0
+	local password = opts.password
+	local username = opts.username
 
 	-- prevent re-mount
 	if is_mounted(opts.device) then
 		return true
 	end
 
-	local err, res = run_command("gio", { "mount", device.uri })
+	local auths = ""
+	local auth_string_format = ""
+	if password or username then
+		if username then
+			auths = path_quote(username)
+			auth_string_format = auth_string_format .. "%s\n"
+		end
+		if password then
+			auths = auths .. " " .. path_quote(password)
+			auth_string_format = auth_string_format .. "%s\n"
+		end
+	end
+
+	local res, err = Command(shell)
+		:arg({
+			"-c",
+			(auth_string_format ~= "" and "printf " .. path_quote(auth_string_format) .. " " .. auths .. " | " or "")
+				.. " gio mount "
+				.. path_quote(device.uri),
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
 
 	local mount_success = res and res.status and res.status.success
 
 	if mount_success then
 		info(NOTIFY_MSG.MOUNT_SUCCESS, device.name)
 		return true
+	elseif res and res.status.code == 2 then
+		if res.stdout:find("Authentication Required") then
+			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
+			if stdout:find("\nUser: \n") then
+				err = string.format(
+					NOTIFY_MSG.MOUNT_ERROR_USERNAME,
+					(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+				)
+				if retries < max_retry then
+					username, _ = show_input("Enter username:", false)
+					if username == nil then
+						return false
+					end
+				end
+			end
+			if stdout:find("\nPassword: \n") or stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
+				err = string.format(
+					NOTIFY_MSG.MOUNT_ERROR_PASSWORD,
+					(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+				)
+				if retries < max_retry then
+					password, _ = show_input("Enter password:", true)
+					if password == nil then
+						return false
+					end
+				end
+			end
+		end
 	end
-
 	-- show notification after get max retry
 	if retries >= max_retry then
-		error(NOTIFY_MSG.MOUNT_ERROR, tostring(err) or "Unknown")
+		err = tostring(err) or ""
+		local _err = err and err ~= "" and err or tostring(res and (res.stderr or res.stdout))
+		error(_err and _err ~= "" and _err or "Error: Unknown")
 		return false
 	end
 
@@ -391,6 +573,8 @@ local function mount_device(opts)
 		device = device,
 		retries = retries,
 		max_retry = max_retry,
+		password = password,
+		username = username,
 	})
 end
 
@@ -459,7 +643,8 @@ local function unmount_gvfs(device, eject)
 end
 
 ---show which key to select device from list
----@param devices Device[]
+---@param devices Device|Mount[]
+---@return number|nil
 local function select_device_which_key(devices)
 	local which_keys = get_state(STATE_KEY.WHICH_KEYS)
 		or "1234567890qwertyuiopasdfghjklzxcvbnm-=[]\\;',./!@#$%^&*()_+{}|:\"<>?"
@@ -472,7 +657,7 @@ local function select_device_which_key(devices)
 		end
 		table.insert(
 			cands,
-			{ on = tostring(allow_key_array[idx]), desc = (d.name or "NO_NAME") .. " (" .. d.schema .. ")" }
+			{ on = tostring(allow_key_array[idx]), desc = (d.name or "NO_NAME") .. " (" .. d.scheme .. ")" }
 		)
 	end
 
@@ -484,7 +669,7 @@ local function select_device_which_key(devices)
 	})
 
 	if selected_idx and selected_idx > 0 then
-		return devices[selected_idx]
+		return selected_idx
 	end
 end
 
@@ -493,38 +678,62 @@ end
 ---@return Device?
 local function get_device_from_path(path, devices)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
-	local schema, uri = string.match(path, root_mountpoint .. "/([^:]+):host=([^/]+)")
-	local domain, user = nil, nil
-	if not uri or not schema then
+	local scheme, uri = string.match(path, root_mountpoint .. "/([^:]+):host=(.+)")
+	local domain, user, ssl, prefix = nil, nil, nil, nil
+	if not uri or not scheme then
 		return nil
-	end
-	if
-		schema == SCHEMA.DAV
-		or schema == SCHEMA.AFP
-		or schema == SCHEMA.GOOGLE_DRIVE
-		or schema == SCHEMA.NFS
-		or schema == SCHEMA.SFTP
-		or schema == SCHEMA.SMB
-		or schema == SCHEMA.DNS_SD
-	then
-		domain, user = extract_domain_and_user(uri)
-	else
-		uri = is_literal_string(schema .. "://" .. uri)
 	end
 	if not devices then
 		devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 	end
-	for _, device in ipairs(devices) do
-		if device.uri:match("^" .. uri .. ".*") then
-			return device
-		end
-		for _, mount in ipairs(device.mounts) do
-			if mount.uri:match("^" .. uri .. ".*") then
+	if
+		scheme == SCHEME.DAV
+		or scheme == SCHEME.AFP
+		or scheme == SCHEME.DAVS
+		or scheme == SCHEME.DAVSD
+		or scheme == SCHEME.DAVSSD
+		or scheme == SCHEME.FTP
+		or scheme == SCHEME.FTPS
+		or scheme == SCHEME.FTPIS
+		or scheme == SCHEME.GOOGLE_DRIVE
+		or scheme == SCHEME.NFS
+		or scheme == SCHEME.SFTP
+		or scheme == SCHEME.SMB
+		or scheme == SCHEME.DNS_SD
+	then
+		domain, user, ssl, prefix = extract_domain_user_from_foldername(scheme .. ":host=" .. uri)
+		for _, device in ipairs(devices) do
+			local d_scheme, d_domain, d_user, d_ssl, d_prefix = extract_domain_user_from_uri(device.uri)
+			if
+				d_scheme:match("^" .. scheme)
+				and d_domain == domain
+				and d_user == user
+				and d_ssl == ssl
+				and d_prefix == prefix
+			then
 				return device
-			else
-				local _, d_uri = string.match(mount.uri, "^([^:]+)://([^/]+)")
-				local d_domain, d_user = extract_domain_and_user(d_uri)
-				if d_domain == domain and d_user == user then
+			end
+			for _, mount in ipairs(device.mounts) do
+				d_scheme, d_domain, d_user, d_ssl, d_prefix = extract_domain_user_from_uri(mount.uri)
+				if
+					d_scheme:match("^" .. scheme)
+					and d_domain == domain
+					and d_user == user
+					and d_ssl == ssl
+					and d_prefix == prefix
+				then
+					return device
+				end
+			end
+		end
+	else
+		uri = is_literal_string(scheme .. "://" .. uri)
+		for _, device in ipairs(devices) do
+			if device.uri:match("^" .. uri .. ".*") then
+				return device
+			end
+			for _, mount in ipairs(device.mounts) do
+				if mount.uri:match("^" .. uri .. ".*") then
 					return device
 				end
 			end
@@ -538,7 +747,7 @@ end
 local function jump_to_device_mountpoint_action(device)
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
-		device = #list_devices == 1 and list_devices[1] or select_device_which_key(list_devices)
+		device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 	end
 	if not device then
 		return
@@ -576,7 +785,7 @@ local function mount_action(opts)
 	if not opts or not opts.device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.NOT_MOUNTED)
 		-- NOTE: Automatically select the first device if there is only one device
-		selected_device = #list_devices == 1 and list_devices[1] or select_device_which_key(list_devices)
+		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if #list_devices == 0 then
 			-- If every devices are mounted, then select the first one
 			local list_devices_mounted = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
@@ -635,7 +844,7 @@ local function unmount_action(device, eject)
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 		-- NOTE: Automatically select the first device if there is only one device
-		selected_device = #list_devices == 1 and list_devices[1] or select_device_which_key(list_devices)
+		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if not selected_device and #list_devices == 0 then
 			error(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		end
@@ -697,30 +906,179 @@ local function check_cmd_exist(cmd)
 	return cmd_not_found
 end
 
+---comment
+local save_mounts = function()
+	local mounts = get_state(STATE_KEY.MOUNTS)
+	local mounts_to_save = {}
+	for idx = #mounts, 1, -1 do
+		if mounts[idx].is_manually_added then
+			-- save name, uri, scheme, is_manually_added
+			table.insert(mounts_to_save, 1, {
+				name = mounts[idx].name,
+				uri = mounts[idx].uri,
+				scheme = mounts[idx].scheme,
+				is_manually_added = mounts[idx].is_manually_added,
+			})
+		end
+	end
+
+	local save_path = Url(get_state(STATE_KEY.SAVE_PATH))
+	-- create parent directories
+	local save_path_created, err_create = fs.create("dir_all", save_path.parent)
+
+	if err_create then
+		error(NOTIFY_MSG.CANT_CREATE_SAVE_FOLDER, tostring(save_path.parent))
+	end
+
+	-- save prefs to file
+	if save_path_created then
+		local _, err_write = fs.write(save_path, ya.json_encode(mounts))
+		if err_write then
+			error(NOTIFY_MSG.CANT_SAVE_DEVICES, tostring(save_path))
+		end
+	end
+
+	-- trigger update to other instances
+	broadcast(PUBSUB_KIND.mounts_changed, mounts)
+end
+
+local read_mounts_from_saved_file = function(save_path)
+	local file = io.open(save_path, "r")
+	if file == nil then
+		return {}
+	end
+	local encoded_data = file:read("*all")
+	file:close()
+	return ya.json_decode(encoded_data)
+end
+
+---@param is_edit boolean?
+local function add_or_edit_mount_action(is_edit)
+	---@type any
+	local mount = {
+		is_manually_added = true,
+	}
+
+	local selected_idx = nil
+
+	if is_edit then
+		local mounts = get_state(STATE_KEY.MOUNTS)
+		if #mounts == 0 then
+			info(NOTIFY_MSG.LIST_MOUNTS_EMPTY)
+			return
+		end
+		selected_idx = select_device_which_key(mounts)
+		if not selected_idx then
+			return
+		end
+		mount = tbl_deep_clone(mounts[selected_idx])
+	end
+
+	mount.uri, _ = show_input("Enter mount URI:", false, mount.uri)
+	if mount.uri == nil then
+		return
+	elseif mount.uri == "" then
+		error(NOTIFY_MSG.URI_CANT_BE_EMPTY)
+	end
+	mount.uri = mount.uri:gsub("/$", "")
+	-- sftp://test@192.168.1.2
+	-- ftp://huyhoang@192.168.1.2:9999/
+	local _scheme, uri = string.match(mount.uri, "([^:]+)://(.+)")
+	local scheme
+	if not _scheme or not uri then
+		error(NOTIFY_MSG.URI_IS_INVALID)
+		return
+	end
+	for _, value in pairs(SCHEME) do
+		if _scheme == value then
+			scheme = value
+		end
+	end
+
+	mount.scheme = scheme
+	if not scheme then
+		error(NOTIFY_MSG.UNSUPPORTED_SCHEME, tostring(_scheme))
+		return
+	end
+
+	mount.name, _ = show_input("Enter display name:", false, uri)
+
+	if mount.name == nil then
+		return
+	end
+
+	if mount.name == "" or not mount.name then
+		error(NOTIFY_MSG.DISPLAY_NAME_CANT_BE_EMPTY)
+		return
+	end
+
+	local mounts = get_state(STATE_KEY.MOUNTS)
+	if selected_idx then
+		Command("gio", { "mount", "-u", mounts[selected_idx].uri })
+		mounts[selected_idx] = mount
+	else
+		table.insert(mounts, mount)
+	end
+	set_state(STATE_KEY.MOUNTS, mounts)
+	save_mounts()
+end
+
+local function remove_mount_action()
+	local mounts = get_state(STATE_KEY.MOUNTS)
+	if #mounts == 0 then
+		info(NOTIFY_MSG.LIST_MOUNTS_EMPTY)
+		return
+	end
+
+	local selected_idx = select_device_which_key(mounts)
+	local mount = mounts[selected_idx]
+	if not mount then
+		return
+	end
+
+	run_command("gio", { "mount", "-u", mount.uri })
+	table.remove(mounts, selected_idx)
+	set_state(STATE_KEY.MOUNTS, mounts)
+	save_mounts()
+end
+
 ---setup function in yazi/init.lua
 ---@param opts {}
 function M:setup(opts)
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then
 		set_state(STATE_KEY.WHICH_KEYS, opts.which_keys)
 	end
+	local save_path = (ya.target_family() == "windows" and os.getenv("APPDATA") .. "\\yazi\\config\\gvfs.private")
+		or (os.getenv("HOME") .. "/.config/yazi/gvfs.private")
+	if type(opts) == "table" then
+		save_path = opts.save_path or save_path
+	end
+
+	set_state(STATE_KEY.SAVE_PATH, save_path)
+
 	if opts and opts.root_mountpoint and type(opts.root_mountpoint) == "string" then
 		set_state(STATE_KEY.ROOT_MOUNTPOINT, opts.root_mountpoint)
 	else
 		set_state(STATE_KEY.ROOT_MOUNTPOINT, GVFS_ROOT_MOUNTPOINT)
 	end
+	set_state(STATE_KEY.MOUNTS, read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH)))
+
+	ps.sub_remote(PUBSUB_KIND.mounts_changed, function(mounts)
+		set_state(STATE_KEY.MOUNTS, mounts)
+	end)
 end
 
 ---@param job {args: string[], args: {jump: boolean?, eject: boolean?}}
 function M:entry(job)
 	check_cmd_exist("gio")
 	local action = job.args[1]
-	local jump = job.args.jump or false
-	local eject = job.args.eject or false
 	-- Select a device then mount
 	if action == ACTION.SELECT_THEN_MOUNT then
+		local jump = job.args.jump or false
 		mount_action({ jump = jump })
 		-- select a device then unmount
 	elseif action == ACTION.SELECT_THEN_UNMOUNT then
+		local eject = job.args.eject or false
 		unmount_action(nil, eject)
 		-- remount device within current cwd
 	elseif action == ACTION.REMOUNT_KEEP_CWD_UNCHANGED then
@@ -730,6 +1088,12 @@ function M:entry(job)
 		jump_to_device_mountpoint_action()
 	elseif action == ACTION.JUMP_BACK_PREV_CWD then
 		jump_to_prev_cwd_action()
+	elseif action == ACTION.ADD_MOUNT then
+		add_or_edit_mount_action()
+	elseif action == ACTION.EDIT_MOUNT then
+		add_or_edit_mount_action(true)
+	elseif action == ACTION.REMOVE_MOUNT then
+		remove_mount_action()
 	end
 	ya.render()
 end

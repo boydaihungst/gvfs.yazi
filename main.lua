@@ -108,7 +108,7 @@ local function show_input(title, is_password, value)
 		title = title,
 		value = value or "",
 		obscure = is_password or false,
-		position = { "top-center", y = 3, w = 40 },
+		position = { "top-center", y = 3, w = 60 },
 	})
 	if input_pw_event ~= 1 then
 		return nil, nil

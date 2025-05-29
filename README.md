@@ -27,6 +27,10 @@ NOTE:
 
 - Trash won't work on some protocols, use permanently delete instead.
 
+## Preview
+
+https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
+
 ## Features
 
 - Support all gvfs schemes (mtp, smb, ftp, sftp, nfs, gphoto2, afp, afc, sshfs, dav, davs, dav+sd, davs+sd, dns-sd)

@@ -12,10 +12,10 @@
 [gvfs.yazi](https://github.com/boydaihungst/gvfs.yazi) uses [gvfs](https://wiki.gnome.org/Projects/gvfs) and [gio from glib](https://github.com/GNOME/glib) to transparently mount and unmount devices in read/write mode,
 allowing you to navigate inside, view, and edit individual or groups of files.
 
-Supported protocols: MTP, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive, DNS-SD, DAV (WebDAV), AFP, AFC.
+Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive, DNS-SD, DAV (WebDAV), AFP, AFC.
 You need to install corresponding packages to use them.
 
-Tested: MTP, GPhoto2 (PTP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
+Tested: MTP, Hard disk/drive, GPhoto2 (PTP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC protocols or mount URIs for other protocols.
 For other protocols (smb, ftp, sftp, etc), add mount URIs using `add-mount` action. See more in the keymap below.

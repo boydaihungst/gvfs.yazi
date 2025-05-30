@@ -679,7 +679,7 @@ end
 local function get_device_from_path(path, devices)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	local scheme, uri = string.match(path, root_mountpoint .. "/([^:]+):host=(.+)")
-	local domain, user, ssl, prefix = nil, nil, nil, nil
+	local domain, user, ssl, prefix, port = nil, nil, nil, nil, nil
 	if not uri or not scheme then
 		return nil
 	end
@@ -701,26 +701,28 @@ local function get_device_from_path(path, devices)
 		or scheme == SCHEME.SMB
 		or scheme == SCHEME.DNS_SD
 	then
-		domain, user, ssl, prefix = extract_domain_user_from_foldername(scheme .. ":host=" .. uri)
+		domain, user, ssl, prefix, port = extract_domain_user_from_foldername(scheme .. ":host=" .. uri)
 		for _, device in ipairs(devices) do
-			local d_scheme, d_domain, d_user, d_ssl, d_prefix = extract_domain_user_from_uri(device.uri)
+			local d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(device.uri)
 			if
 				d_scheme:match("^" .. scheme)
 				and d_domain == domain
 				and d_user == user
 				and d_ssl == ssl
 				and d_prefix == prefix
+				and d_port == port
 			then
 				return device
 			end
 			for _, mount in ipairs(device.mounts) do
-				d_scheme, d_domain, d_user, d_ssl, d_prefix = extract_domain_user_from_uri(mount.uri)
+				d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(mount.uri)
 				if
 					d_scheme:match("^" .. scheme)
 					and d_domain == domain
 					and d_user == user
 					and d_ssl == ssl
 					and d_prefix == prefix
+					and d_port == port
 				then
 					return device
 				end

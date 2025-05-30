@@ -17,8 +17,8 @@ You need to install corresponding packages to use them.
 
 Tested: MTP, GPhoto2 (PIP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
-By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC protocols are always when they are connected.
-For other protocols (smb, ftp, sftp, etc), add them using `add-mount` action. See more in the keymap below.
+By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC protocols or mount URIs for other protocols.
+For other protocols (smb, ftp, sftp, etc), add  mount URIs using `add-mount` action. See more in the keymap below.
 
 NOTE:
 

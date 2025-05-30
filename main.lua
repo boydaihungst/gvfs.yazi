@@ -5,7 +5,10 @@ local shell = os.getenv("SHELL") or ""
 local home = os.getenv("HOME") or ""
 local PLUGIN_NAME = "gvfs"
 
-local GVFS_ROOT_MOUNTPOINT = "/run/user/" .. tostring(ya.uid()) .. "/gvfs"
+local USER_ID = ya.uid()
+local USER_NAME = tostring(ya.user_name(USER_ID))
+local GVFS_ROOT_MOUNTPOINT = "/run/user/" .. tostring(USER_ID) .. "/gvfs"
+local GVFS_ROOT_MOUNTPOINT_FILE = "/run/media/" .. USER_NAME
 
 ---@enum NOTIFY_MSG
 local NOTIFY_MSG = {
@@ -14,7 +17,7 @@ local NOTIFY_MSG = {
 	CMD_NOT_FOUND = "%s not found. Make sure it is installed.",
 	MOUNT_SUCCESS = "Mounted device %s",
 	MOUNT_ERROR = "Mount error: %s",
-	UNMOUNT_ERROR = "Device is busy",
+	UNMOUNT_ERROR = "Unmount error: %s",
 	UNMOUNT_SUCCESS = "Unmounted device %s",
 	EJECT_SUCCESS = "Ejected device %s, it can safely be removed",
 	LIST_DEVICES_EMPTY = "No devices found.",
@@ -53,6 +56,7 @@ local SCHEME = {
 	DAVSSD = "davs+sd",
 	AFP = "afp",
 	AFC = "afc",
+	FILE = "file",
 }
 ---@enum STATE_KEY
 local STATE_KEY = {
@@ -82,6 +86,8 @@ local ACTION = {
 ---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
+---@field uuid string?
+---@field owner string?
 ---@field activation_root string?
 ---@field uri string
 ---@field is_manually_added boolean?
@@ -96,6 +102,8 @@ local ACTION = {
 ---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
+---@field uuid string?
+---@field owner string?
 ---@field default_location string?
 ---@field can_unmount "1"|"0"|nil
 ---@field can_eject "1"|"0"|nil
@@ -308,7 +316,11 @@ end
 local function is_mountpoint_belong_to_volume(mount, volume)
 	return mount.is_shadowed ~= "1"
 		and mount.scheme == volume.scheme
-		and (mount.uri == volume.uri or (mount.bus == volume.bus and mount.device == volume.device))
+		and (
+			mount.uri == volume.uri
+			or mount.uuid == volume.uuid
+			or (mount.bus == volume.bus and mount.device == volume.device)
+		)
 end
 
 local function parse_devices(raw_input)
@@ -368,6 +380,12 @@ local function parse_devices(raw_input)
 					current_mount.bus = bus
 					current_mount.device = device
 				end
+				-- file:///run/media/huyhoang/6412-E4B2
+				local owner, uuid = mount_uri:match("^file:///run/media/(.+)/(.+)")
+				if owner and uuid then
+					current_mount.owner = owner
+					current_mount.uuid = uuid
+				end
 			end
 			table.insert(mounts, current_mount)
 
@@ -400,10 +418,15 @@ local function parse_devices(raw_input)
 		if v.activation_root then
 			v.uri = v.activation_root
 		end
+
 		-- Attach scheme to volume
-		for _, value in pairs(SCHEME) do
-			if v.uri:match("^" .. value .. ":") then
-				v.scheme = value
+		if v.uuid then
+			v.scheme = SCHEME.FILE
+		else
+			for _, value in pairs(SCHEME) do
+				if v.uri and v.uri:match("^" .. value .. ":") then
+					v.scheme = value
+				end
 			end
 		end
 
@@ -421,7 +444,7 @@ local function parse_devices(raw_input)
 	end
 
 	for _, m in ipairs(mounts) do
-		if m.is_shadowed ~= "1" then
+		if m.is_shadowed ~= "1" and m.uri then
 			m.mounts = { tbl_deep_clone(m) }
 			table.insert(volumes, m)
 		end
@@ -467,10 +490,13 @@ local function get_mount_path(target)
 			end
 		end
 		return ""
-	else
+	elseif target.scheme == SCHEME.FILE and target.uuid then
+		return pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.uuid)
+	elseif target.uri then
 		local uri = target.uri:gsub("//", "host=", 1)
 		return pathJoin(root_mountpoint, uri)
 	end
+	return ""
 end
 
 ---@param device Device
@@ -519,7 +545,7 @@ local function mount_device(opts)
 			"-c",
 			(auth_string_format ~= "" and "printf " .. path_quote(auth_string_format) .. " " .. auths .. " | " or "")
 				.. " gio mount "
-				.. path_quote(device.uri),
+				.. (device.uuid and ("-d " .. device.uuid) or path_quote(device.uri)),
 		})
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
@@ -584,7 +610,7 @@ local function list_gvfs_device()
 	---@type Device[]
 	local devices = {}
 	local _, res = run_command("gio", { "mount", "-li" })
-	if res then
+	if res and res.status then
 		if res.status.success then
 			devices = parse_devices(res.stdout)
 		end
@@ -614,10 +640,13 @@ end
 ---@param device Device
 ---@param eject boolean? eject = true if user want to safty unplug the device
 ---@return boolean
-local function unmount_gvfs(device, eject)
+local function unmount_gvfs(device, eject, max_retry, retries)
 	if not device then
 		return true
 	end
+	max_retry = max_retry or 3
+	retries = retries or 0
+
 	local unmount_method = "-u"
 	if eject then
 		unmount_method = "-e"
@@ -628,8 +657,11 @@ local function unmount_gvfs(device, eject)
 			if res and res.stderr:find("mount doesn.*t implement .*eject.* or .*eject_with_operation.*") then
 				return unmount_gvfs(device, false)
 			end
-			error(NOTIFY_MSG.UNMOUNT_ERROR)
-			return false
+			if retries >= max_retry then
+				error(NOTIFY_MSG.UNMOUNT_ERROR, tostring(res and (res.stderr or res.stdout)))
+				return false
+			end
+			return unmount_gvfs(device, eject, max_retry, retries + 1)
 		end
 		if not cmd_err and res and res.status.success then
 			if eject then
@@ -678,7 +710,7 @@ end
 ---@return Device?
 local function get_device_from_path(path, devices)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
-	local scheme, uri = string.match(path, root_mountpoint .. "/([^:]+):host=(.+)")
+	local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
 	local domain, user, ssl, prefix, port = nil, nil, nil, nil, nil
 	if not uri or not scheme then
 		return nil
@@ -726,6 +758,13 @@ local function get_device_from_path(path, devices)
 				then
 					return device
 				end
+			end
+		end
+	elseif string.find(path, "^" .. GVFS_ROOT_MOUNTPOINT_FILE) then
+		local uuid = string.match(path, "^" .. GVFS_ROOT_MOUNTPOINT_FILE .. "/([^/]+)")
+		for _, device in ipairs(devices) do
+			if device.uuid == uuid then
+				return device
 			end
 		end
 	else
@@ -859,8 +898,11 @@ local function unmount_action(device, eject)
 	end
 
 	local mount_path = get_mount_path(selected_device)
+	if selected_device.uuid then
+		redirect_unmounted_tab_to_home(mount_path)
+	end
 	local success = unmount_gvfs(selected_device, eject)
-	if success then
+	if success and not selected_device.uuid then
 		redirect_unmounted_tab_to_home(mount_path)
 		-- cd to home for all tabs within the device, and then restore the tabs location
 	end
@@ -878,7 +920,7 @@ local function remount_keep_cwd_unchanged_action()
 	-- cd to home for all tabs within the device, and then restore the tabs location
 	for _, tab in ipairs(tabs) do
 		local tab_device = get_device_from_path(tostring(tab.cwd), devices)
-		if tab_device and tab_device.name == current_tab_device.name and tab_device.type == current_tab_device.type then
+		if tab_device and tab_device.name == current_tab_device.name then
 			table.insert(saved_matched_tabs, tab)
 			ya.emit("cd", {
 				root_mountpoint,
@@ -992,7 +1034,7 @@ local function add_or_edit_mount_action(is_edit)
 		return
 	end
 	for _, value in pairs(SCHEME) do
-		if _scheme == value then
+		if _scheme == value and value ~= SCHEME.FILE then
 			scheme = value
 		end
 	end

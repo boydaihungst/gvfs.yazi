@@ -27,6 +27,9 @@ NOTE:
 
 - Trash won't work on some protocols, use permanently delete instead.
 
+- SCHEMES URI shouldn't contain password, because it's saved as plaintext in `yazi/config/gvfs.private`.
+
+
 ## Preview
 
 https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
@@ -87,6 +90,10 @@ Modify your `~/.config/yazi/init.lua` to include:
 require("gvfs"):setup({
   -- (Optional) Allowed keys to select device.
   which_keys = "1234567890qwertyuiopasdfghjklzxcvbnm-=[]\\;',./!@#$%^&*()_+{}|:\"<>?",
+
+  -- (Optional) Save file.
+  -- Default: ~/.config/yazi/gvfs.private
+  save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private"
 })
 ```
 

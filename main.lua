@@ -23,6 +23,9 @@ local NOTIFY_MSG = {
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
 	EJECT_SUCCESS = 'Ejected "%s", it can safely be removed',
 	LIST_DEVICES_EMPTY = "No device or URI found.",
+	REMOVED_MOUNT_URI = "Device or URI removed: %s",
+	ADDED_MOUNT_URI = "Device or URI added: %s",
+	UPDATED_MOUNT_URI = "Device or URI updated: %s",
 	DEVICE_IS_DISCONNECTED = "Device or URI is disconnected",
 	CANT_ACCESS_PREV_CWD = "Device or URI is disconnected or Previous directory is removed",
 	URI_CANT_BE_EMPTY = "URI can't be empty",
@@ -350,6 +353,10 @@ local function is_secret_vault_locked()
 	if err or (res and res.stderr and res.stderr:match("secret%-tool: Cannot get secret of a locked object")) then
 		return true
 	end
+	if res and res.status and res.stderr:match("secret%-tool: The name is not activatable") then
+		return true
+	end
+
 	return false
 end
 
@@ -385,6 +392,9 @@ local function search_password(protocol, user, domain, prefix, port)
 	end
 	if res and res.status and res.status.success then
 		return parse_secret_tool_search_output(res.stdout .. res.stderr), false
+	end
+	if res and res.status and res.stderr:match("secret%-tool: The name is not activatable") then
+		return {}, false
 	end
 	return {}, true
 end
@@ -1367,8 +1377,10 @@ local function add_or_edit_mount_action(is_edit)
 			end
 		end
 		mounts[selected_idx] = mount
+		info(NOTIFY_MSG.UPDATED_MOUNT_URI, mount.name)
 	else
 		table.insert(mounts, mount)
+		info(NOTIFY_MSG.ADDED_MOUNT_URI, mount.name)
 	end
 	set_state(STATE_KEY.MOUNTS, mounts)
 	save_mounts()
@@ -1406,8 +1418,9 @@ local function remove_mount_action()
 			end
 		end
 	end
-	table.remove(mounts, selected_idx)
+	local removed_mount = table.remove(mounts, selected_idx)
 	set_state(STATE_KEY.MOUNTS, mounts)
+	info(NOTIFY_MSG.REMOVED_MOUNT_URI, removed_mount.name)
 	save_mounts()
 end
 

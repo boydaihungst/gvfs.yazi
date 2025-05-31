@@ -173,6 +173,7 @@ prepend_keymap = [
     # Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
     # For example: smb://user:password@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
     { on = [ "M", "a" ], run = "plugin gvfs -- add-mount", desc = "Add a GVFS mount URI" },
+    # Edit or remove a GVFS mount URI will clear saved passwords for that mount URI.
     { on = [ "M", "e" ], run = "plugin gvfs -- edit-mount", desc = "Edit a GVFS mount URI" },
     { on = [ "M", "r" ], run = "plugin gvfs -- remove-mount", desc = "Remove a GVFS mount URI" },
 

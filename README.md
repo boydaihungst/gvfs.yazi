@@ -156,7 +156,7 @@ require("gvfs"):setup({
 Add this to your `~/.config/yazi/keymap.toml`:
 
 ```toml
-[manager]
+[mgr]
 prepend_keymap = [
     # gvfs plugin
     { on = [ "M", "m" ], run = "plugin gvfs -- select-then-mount", desc = "Select device then mount" },

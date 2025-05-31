@@ -158,7 +158,7 @@ Add this to your `~/.config/yazi/keymap.toml`:
 ```toml
 [manager]
 prepend_keymap = [
-    # simple-mtpfs plugin
+    # gvfs plugin
     { on = [ "M", "m" ], run = "plugin gvfs -- select-then-mount", desc = "Select device then mount" },
     # or this if you want to jump to mountpoint after mounted
     { on = [ "M", "m" ], run = "plugin gvfs -- select-then-mount --jump", desc = "Select device to mount and jump to its mount point" },

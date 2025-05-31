@@ -9,27 +9,33 @@ local USER_ID = ya.uid()
 local USER_NAME = tostring(ya.user_name(USER_ID))
 local GVFS_ROOT_MOUNTPOINT = "/run/user/" .. tostring(USER_ID) .. "/gvfs"
 local GVFS_ROOT_MOUNTPOINT_FILE = "/run/media/" .. USER_NAME
+local SECRET_TOOL = "secret-tool"
+local SECRET_VAULT_VERSION = "1"
 
 ---@enum NOTIFY_MSG
 local NOTIFY_MSG = {
 	CANT_CREATE_SAVE_FOLDER = "Can't create save folder: %s",
 	CANT_SAVE_DEVICES = "Can't write to save file: %s",
-	CMD_NOT_FOUND = "%s not found. Make sure it is installed.",
-	MOUNT_SUCCESS = "Mounted device %s",
+	CMD_NOT_FOUND = 'Command "%s" not found. Make sure it is installed.',
+	MOUNT_SUCCESS = 'Mounted: "%s"',
 	MOUNT_ERROR = "Mount error: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
-	UNMOUNT_SUCCESS = "Unmounted device %s",
-	EJECT_SUCCESS = "Ejected device %s, it can safely be removed",
-	LIST_DEVICES_EMPTY = "No devices found.",
-	DEVICE_IS_DISCONNECTED = "Device is disconnected",
-	CANT_ACCESS_PREV_CWD = "Device is disconnected or Previous directory is removed",
+	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
+	EJECT_SUCCESS = 'Ejected "%s", it can safely be removed',
+	LIST_DEVICES_EMPTY = "No device or URI found.",
+	DEVICE_IS_DISCONNECTED = "Device or URI is disconnected",
+	CANT_ACCESS_PREV_CWD = "Device or URI is disconnected or Previous directory is removed",
 	URI_CANT_BE_EMPTY = "URI can't be empty",
 	URI_IS_INVALID = "URI is invalid",
 	UNSUPPORTED_SCHEME = "Unsupported scheme %s",
 	DISPLAY_NAME_CANT_BE_EMPTY = "Display name can't be empty",
-	MOUNT_ERROR_PASSWORD = "Failed to mount device %s, please check your password",
-	MOUNT_ERROR_USERNAME = "Failed to mount device %s, please check your username",
-	LIST_MOUNTS_EMPTY = "List mounts is empty",
+	MOUNT_ERROR_PASSWORD = 'Failed to mount "%s", please check your password',
+	MOUNT_ERROR_USERNAME = 'Failed to mount "%s", please check your username',
+	LIST_MOUNTS_EMPTY = "List mounts URI is empty",
+	RETRIVE_PASSWORD_SUCCESS = "Retrieved password from secret vault",
+	SAVE_PASSWORD_SUCCESS = "Saved password to secret vault",
+	SAVE_PASSWORD_FAILED = "Save password failed: %s",
+	SECRET_VAULT_LOCKED = "Secret vault is locked%s",
 }
 
 ---@enum DEVICE_CONNECT_STATUS
@@ -62,10 +68,12 @@ local SCHEME = {
 local STATE_KEY = {
 	PREV_CWD = "PREV_CWD",
 	WHICH_KEYS = "WHICH_KEYS",
-	CMD_NOT_FOUND = "CMD_NOT_FOUND",
+	CMD_FOUND = "CMD_FOUND",
 	ROOT_MOUNTPOINT = "ROOT_MOUNTPOINT",
 	SAVE_PATH = "SAVE_PATH",
 	MOUNTS = "MOUNTS",
+	ENABLED_KEYRING = "ENABLED_KEYRING",
+	SAVE_PASSWORD_AUTOCONFIRM = "SAVE_PASSWORD_AUTOCONFIRM",
 }
 
 ---@enum ACTION
@@ -125,11 +133,11 @@ local function show_input(title, is_password, value)
 end
 
 local function error(s, ...)
-	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 5, level = "error" })
+	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 3, level = "error" })
 end
 
 local function info(s, ...)
-	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 5, level = "info" })
+	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 3, level = "info" })
 end
 
 local set_state = ya.sync(function(state, key, value)
@@ -139,6 +147,39 @@ end)
 local get_state = ya.sync(function(state, key)
 	return state[key]
 end)
+
+---run any command
+---@param cmd string
+---@param args string[]
+---@param _stdin? Stdio|nil
+---@return Error|nil, Output|nil
+local function run_command(cmd, args, _stdin)
+	local stdin = _stdin or Command.INHERIT
+	local child, cmd_err = Command(cmd):arg(args):stdin(stdin):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
+
+	if not child then
+		error("Failed to start `%s` with error: `%s`", cmd, cmd_err)
+		return cmd_err, nil
+	end
+
+	local output, out_err = child:wait_with_output()
+	if not output then
+		error("Cannot read `%s` output, error: `%s`", cmd, out_err)
+		return out_err, nil
+	else
+		return nil, output
+	end
+end
+
+local function is_cmd_exist(cmd)
+	local cmd_found = get_state(STATE_KEY.CMD_FOUND .. cmd)
+	if cmd_found == nil then
+		local _, output = run_command("which", { cmd })
+		cmd_found = output and output.status and output.status.success
+		set_state(STATE_KEY.CMD_FOUND .. cmd, cmd_found)
+	end
+	return cmd_found
+end
 
 local function pathJoin(...)
 	-- Detect OS path separator ('\' for Windows, '/' for Unix)
@@ -176,29 +217,6 @@ local PUBSUB_KIND = {
 local broadcast = ya.sync(function(_, pubsub_kind, data, to)
 	ps.pub_to(to or 0, pubsub_kind, data)
 end)
-
----run any command
----@param cmd string
----@param args string[]
----@param _stdin? Stdio|nil
----@return Error|nil, Output|nil
-local function run_command(cmd, args, _stdin)
-	local stdin = _stdin or Command.INHERIT
-	local child, cmd_err = Command(cmd):arg(args):stdin(stdin):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
-
-	if not child then
-		error("Failed to start `%s` with error: `%s`", cmd, cmd_err)
-		return cmd_err, nil
-	end
-
-	local output, out_err = child:wait_with_output()
-	if not output then
-		error("Cannot read `%s` output, error: `%s`", cmd, out_err)
-		return out_err, nil
-	else
-		return nil, output
-	end
-end
 
 local is_dir = function(dir_path)
 	local cha, err = fs.cha(Url(dir_path))
@@ -241,10 +259,245 @@ local function path_quote(path)
 	return result
 end
 
+---@param secret_tool_output string
+---@return {id: string?, retrieval_error: string?, locked: boolean, attributes: {[string]: string}}[]
+local function parse_secret_tool_search_output(secret_tool_output)
+	local secrets = {}
+	local current_secret = nil
+	local last_retrieval_error = nil
+	local last_locked_error = false
+
+	for line in string.gmatch(secret_tool_output, "[^\r\n]+") do
+		-- Trim leading/trailing whitespace from the line
+		line = line:match("^%s*(.-)%s*$")
+
+		if line == "" then
+			-- Ignore empty lines
+			goto continue
+		end
+
+		-- Check for the specific "Cannot get secret" error
+		if line:match("^secret%-tool: Cannot get secret of a locked object$") then
+			last_retrieval_error = line
+			last_locked_error = true
+			goto continue
+		end
+
+		-- Check for a new secret entry marker, e.g., [/3]
+		local id_match = line:match("^%[/(%d+)%]$")
+		if id_match then
+			-- If there was a pending secret, store it
+			if current_secret then
+				table.insert(secrets, current_secret)
+			end
+			-- Start a new secret object
+			current_secret = {
+				id = id_match,
+				attributes = {}, -- Initialize attributes table
+				locked = last_locked_error,
+			}
+			-- If there was a pending "locked object" error, associate it
+			if last_retrieval_error then
+				current_secret.retrieval_error = last_retrieval_error
+				last_retrieval_error = nil -- Error has been consumed
+			end
+			last_locked_error = false -- Error has been consumed
+			goto continue
+		end
+
+		-- If we are inside a secret entry, parse key-value pairs
+		if current_secret then
+			local key, value = line:match("^([^=]+)%s*=%s*(.+)$")
+			if key and value then
+				-- Trim whitespace from key and value parts
+				key = key:match("^%s*(.-)%s*$")
+				value = value:match("^%s*(.-)%s*$")
+
+				local attr_key = key:match("^attribute%.(.+)$")
+				if attr_key then
+					current_secret.attributes[attr_key] = value
+				else
+					current_secret[key] = value
+				end
+			else
+			end
+		end
+
+		::continue::
+	end
+
+	-- Add the last processed secret if it exists
+	if current_secret then
+		table.insert(secrets, current_secret)
+	end
+
+	return secrets
+end
+
+local function is_secret_vault_locked()
+	if not is_cmd_exist(SECRET_TOOL) then
+		return true
+	end
+	local res, err = Command(SECRET_TOOL)
+		:arg({
+			"search",
+			PLUGIN_NAME,
+			SECRET_VAULT_VERSION,
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if err or (res and res.stderr and res.stderr:match("secret%-tool: Cannot get secret of a locked object")) then
+		return true
+	end
+	return false
+end
+
+---@return {id: string?, retrieval_error: string?, locked: boolean, attributes: {[string]: string}}[], boolean
+local function search_password(protocol, user, domain, prefix, port)
+	if not is_cmd_exist(SECRET_TOOL) then
+		return {}, true
+	end
+
+	local res, err = Command(SECRET_TOOL)
+		:arg({
+			"search",
+			"--all",
+			"--unlock",
+			PLUGIN_NAME,
+			SECRET_VAULT_VERSION,
+			protocol and "protocol" or nil,
+			protocol and protocol or nil,
+			user and "user" or nil,
+			user and user or nil,
+			domain and "domain" or nil,
+			domain and domain or nil,
+			port and "port" or nil,
+			port and port or nil,
+			prefix and "prefix" or nil,
+			prefix and prefix or nil,
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if res and res.stderr and res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
+		return {}, true
+	end
+	if res and res.status and res.status.success then
+		return parse_secret_tool_search_output(res.stdout .. res.stderr), false
+	end
+	return {}, true
+end
+-- secret-tool lookup protocol user domain prefix port
+local function save_password(password, protocol, user, domain, prefix, port)
+	if not user or not password or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
+		return false
+	end
+
+	local res, err = Command(shell)
+		:arg({
+			"-c",
+			("printf %s " .. path_quote(password) .. " | ")
+				.. SECRET_TOOL
+				.. " store "
+				.. " --label "
+				.. path_quote(
+					protocol
+						.. "://"
+						.. user
+						.. "@"
+						.. domain
+						.. (port and (":" .. port) or "")
+						.. (prefix and ("/" .. prefix) or "")
+				)
+				.. " "
+				.. PLUGIN_NAME
+				.. " "
+				.. SECRET_VAULT_VERSION
+				.. " protocol "
+				.. protocol
+				.. " user "
+				.. path_quote(user)
+				.. " domain "
+				.. path_quote(domain)
+				.. (port and (" port " .. port) or "")
+				.. (prefix and (" prefix " .. path_quote(prefix)) or ""),
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if err then
+		error(NOTIFY_MSG.SAVE_PASSWORD_FAILED, res and res.stderr or err)
+		return false
+	end
+	info(NOTIFY_MSG.SAVE_PASSWORD_SUCCESS)
+	return true
+end
+
+local function lookup_password(protocol, user, domain, prefix, port)
+	if not user or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
+		return nil
+	end
+	local res, err = Command(SECRET_TOOL)
+		:arg({
+			"lookup",
+			PLUGIN_NAME,
+			SECRET_VAULT_VERSION,
+			"protocol",
+			protocol,
+			"user",
+			user,
+			"domain",
+			domain,
+			port and "port" or nil,
+			port and port or nil,
+			prefix and "prefix" or nil,
+			prefix and prefix or nil,
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if not err and res and res.status and res.status.success then
+		return res.stdout
+	end
+
+	return nil
+end
+
+local function clear_password(protocol, user, domain, prefix, port)
+	if not user or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
+		return false
+	end
+
+	local res, err = Command(SECRET_TOOL)
+		:arg({
+			"clear",
+			PLUGIN_NAME,
+			SECRET_VAULT_VERSION,
+			"protocol",
+			protocol,
+			"user",
+			user,
+			"domain",
+			domain,
+			port and "port" or nil,
+			port and port or nil,
+			prefix and "prefix" or nil,
+			prefix and prefix or nil,
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if not err and res and res.status and res.status.success then
+		return true
+	end
+	return false
+end
+
 local function extract_domain_user_from_uri(s)
-	local user = ""
-	local domain = ""
-	local port = ""
+	local user
+	local domain
+	local port
 
 	-- Attempt 1: Look for user@domain:port first (if it exists)
 	-- davs://user@domain/dav
@@ -256,7 +509,7 @@ local function extract_domain_user_from_uri(s)
 		-- domain:port
 		domain, port = temp_domain_part:match("^([^:/]+):([^:/]+)")
 		if not port or port == "" then
-			port = ""
+			port = nil
 			domain = temp_domain_part:match("^[^/]+") or temp_domain_part
 		end
 	else
@@ -266,14 +519,14 @@ local function extract_domain_user_from_uri(s)
 		if temp_domain_part then
 			domain, port = temp_domain_part:match("^([^:/]+):([^:/]+)")
 			if not port or port == "" then
-				port = ""
+				port = nil
 				domain = temp_domain_part:match("^[^/]+") or temp_domain_part
 			end
 		end
 	end
 
 	local ssl = (s:match("^davs") or s:match("^ftps") or s:match("^ftpis") or s:match("^https")) and true or false
-	local prefix = s:match(".*" .. domain .. (port ~= "" and ":" .. port or "") .. "/(.+)$") or ""
+	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$") or nil
 	return scheme, domain, user, ssl, prefix, port
 end
 
@@ -289,10 +542,10 @@ local function uri_decode(str)
 end
 
 local function extract_domain_user_from_foldername(s)
-	local user = ""
-	local domain = ""
+	local user
+	local domain
 	local ssl = false
-	local prefix = ""
+	local prefix
 	local scheme
 	local port
 	scheme, s = s:match("^([^:]+):(.+)")
@@ -302,13 +555,13 @@ local function extract_domain_user_from_foldername(s)
 			domain = part:match("^host=([^,/]+)")
 		end
 	end
-	domain = uri_decode(s:match("^host=([^,]+)")) or ""
-	user = uri_decode(s:match(".*user=([^,]+)")) or ""
+	domain = uri_decode(s:match("^host=([^,]+)"))
+	user = uri_decode(s:match(".*user=([^,]+)"))
 	ssl = s:match(".*ssl=true") and true or false
-	prefix = uri_decode(s:match(".*prefix=([^,]+)")) or ""
-	port = s:match(".*port=([^,]+)") or ""
+	prefix = uri_decode(s:match(".*prefix=([^,]+)"))
+	port = s:match(".*port=([^,]+)")
 	if prefix then
-		prefix = prefix:match("/(.+)") or ""
+		prefix = prefix:match("/(.+)")
 	end
 	return scheme, domain, user, ssl, prefix, port
 end
@@ -479,7 +732,9 @@ local function get_mount_path(target)
 		for _, file in ipairs(files or {}) do
 			local f_scheme, f_domain, f_user, f_ssl, f_prefix, f_port = extract_domain_user_from_foldername(file.name)
 			if
-				scheme:match("^" .. f_scheme)
+				scheme
+				and f_scheme
+				and scheme:match("^" .. f_scheme)
 				and f_domain == domain
 				and f_user == user
 				and f_ssl == ssl
@@ -501,7 +756,7 @@ end
 
 ---@param device Device
 local function is_mounted(device)
-	if device and #device.mounts > 0 then
+	if device and device.mounts and #device.mounts > 0 then
 		for _, mount in ipairs(device.mounts) do
 			if mount.can_unmount == "1" or mount.can_eject == "1" then
 				return true
@@ -513,14 +768,16 @@ local function is_mounted(device)
 end
 
 ---mount mtp device
----@param opts {device: Device,username?:string, password?: string, max_retry?: integer, retries?: integer}
+---@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
 local function mount_device(opts)
 	local device = opts.device
 	local max_retry = opts.max_retry or 3
 	local retries = opts.retries or 0
 	local password = opts.password
+	local is_pw_saved = opts.is_pw_saved
 	local username = opts.username
+	local error_msg = nil
 
 	-- prevent re-mount
 	if is_mounted(opts.device) then
@@ -555,41 +812,79 @@ local function mount_device(opts)
 
 	if mount_success then
 		info(NOTIFY_MSG.MOUNT_SUCCESS, device.name)
+		if password and not is_pw_saved and is_cmd_exist(SECRET_TOOL) then
+			if not is_secret_vault_locked() then
+				local confirmed_save_password = get_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM)
+					or ya.confirm({
+						title = ui.Line("Remember password?"):style(th.confirm.title),
+						content = ui.Text({
+							ui.Line(""),
+							ui.Line("Press Yes to save password to keyring."):style(th.confirm.content),
+							ui.Line(""),
+						})
+							:align(ui.Align.CENTER)
+							:wrap(ui.Text.WRAP),
+						pos = { "center", w = 70, h = 10 },
+					})
+
+				if confirmed_save_password then
+					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+					save_password(password, scheme, username or user, domain, prefix, port)
+				end
+			end
+		end
 		return true
 	elseif res and res.status.code == 2 then
 		if res.stdout:find("Authentication Required") then
 			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
 			if stdout:find("\nUser: \n") then
-				err = string.format(
-					NOTIFY_MSG.MOUNT_ERROR_USERNAME,
-					(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
-				)
 				if retries < max_retry then
-					username, _ = show_input("Enter username:", false)
+					username, _ =
+						show_input("Enter username " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":", false)
 					if username == nil then
 						return false
 					end
+				else
+					error_msg = string.format(
+						NOTIFY_MSG.MOUNT_ERROR_USERNAME,
+						(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+					)
 				end
 			end
 			if stdout:find("\nPassword: \n") or stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
-				err = string.format(
-					NOTIFY_MSG.MOUNT_ERROR_PASSWORD,
-					(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
-				)
-				if retries < max_retry then
-					password, _ = show_input("Enter password:", true)
-					if password == nil then
-						return false
+				if
+					is_cmd_exist(SECRET_TOOL)
+					and (username ~= opts.username or (username == nil and is_pw_saved == nil))
+				then
+					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+					password = lookup_password(scheme, username or user, domain, prefix, port)
+					is_pw_saved = password ~= nil
+					if is_pw_saved then
+						info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
 					end
+				end
+				if retries < max_retry then
+					if not is_pw_saved then
+						password, _ = show_input(
+							"Enter password " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+							true
+						)
+						if password == nil then
+							return false
+						end
+					end
+				else
+					error_msg = string.format(
+						NOTIFY_MSG.MOUNT_ERROR_PASSWORD,
+						(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+					)
 				end
 			end
 		end
 	end
 	-- show notification after get max retry
 	if retries >= max_retry then
-		err = tostring(err) or ""
-		local _err = err and err ~= "" and err or tostring(res and (res.stderr or res.stdout))
-		error(_err and _err ~= "" and _err or "Error: Unknown")
+		error(error_msg or res and res.stderr or err or "Error: Unknown")
 		return false
 	end
 
@@ -600,6 +895,7 @@ local function mount_device(opts)
 		retries = retries,
 		max_retry = max_retry,
 		password = password,
+		is_pw_saved = is_pw_saved,
 		username = username,
 	})
 end
@@ -651,7 +947,7 @@ local function unmount_gvfs(device, eject, max_retry, retries)
 	if eject then
 		unmount_method = "-e"
 	end
-	for _, mount in ipairs(device.mounts) do
+	for _, mount in ipairs(device.mounts ~= nil and device.mounts or { device }) do
 		local cmd_err, res = run_command("gio", { "mount", unmount_method, mount.uri })
 		if cmd_err or (res and not res.status.success) then
 			if res and res.stderr:find("mount doesn.*t implement .*eject.* or .*eject_with_operation.*") then
@@ -737,7 +1033,8 @@ local function get_device_from_path(path, devices)
 		for _, device in ipairs(devices) do
 			local d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(device.uri)
 			if
-				d_scheme:match("^" .. scheme)
+				d_scheme
+				and d_scheme:match("^" .. scheme)
 				and d_domain == domain
 				and d_user == user
 				and d_ssl == ssl
@@ -749,7 +1046,8 @@ local function get_device_from_path(path, devices)
 			for _, mount in ipairs(device.mounts) do
 				d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(mount.uri)
 				if
-					d_scheme:match("^" .. scheme)
+					d_scheme
+					and d_scheme:match("^" .. scheme)
 					and d_domain == domain
 					and d_user == user
 					and d_ssl == ssl
@@ -791,12 +1089,13 @@ local function jump_to_device_mountpoint_action(device)
 		device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 	end
 	if not device then
+		info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		return
 	end
-	local success = is_mounted(device)
+	local mnt_point = get_mount_path(device)
+	-- local success = is_mounted(device)
 
-	if success then
-		local mnt_point = get_mount_path(device)
+	if mnt_point ~= "" then
 		set_state(STATE_KEY.PREV_CWD, current_dir())
 		ya.emit("cd", { mnt_point })
 	else
@@ -832,7 +1131,7 @@ local function mount_action(opts)
 			local list_devices_mounted = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 			selected_device = #list_devices_mounted >= 1 and list_devices_mounted[1] or nil
 			if not selected_device then
-				error(NOTIFY_MSG.LIST_DEVICES_EMPTY)
+				info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 			end
 		end
 	else
@@ -887,13 +1186,14 @@ local function unmount_action(device, eject)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if not selected_device and #list_devices == 0 then
-			error(NOTIFY_MSG.LIST_DEVICES_EMPTY)
+			info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		end
 	end
 	if device then
 		selected_device = device
 	end
 	if not selected_device then
+		info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		return
 	end
 
@@ -935,19 +1235,6 @@ local function remount_keep_cwd_unchanged_action()
 			tab = tab.id,
 		})
 	end
-end
-
-local function check_cmd_exist(cmd)
-	local cmd_not_found = get_state(STATE_KEY.CMD_NOT_FOUND)
-	if cmd_not_found == nil then
-		local cmd_err, _ = run_command(cmd, {})
-		cmd_not_found = cmd_err ~= nil
-	end
-	if cmd_not_found then
-		error(NOTIFY_MSG.CMD_NOT_FOUND, cmd)
-	end
-	set_state(STATE_KEY.CMD_NOT_FOUND, cmd_not_found)
-	return cmd_not_found
 end
 
 ---comment
@@ -1045,7 +1332,7 @@ local function add_or_edit_mount_action(is_edit)
 		return
 	end
 
-	mount.name, _ = show_input("Enter display name:", false, uri)
+	mount.name, _ = show_input("Enter display name:", false, mount.name or uri)
 
 	if mount.name == nil then
 		return
@@ -1058,7 +1345,27 @@ local function add_or_edit_mount_action(is_edit)
 
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	if selected_idx then
-		Command("gio", { "mount", "-u", mounts[selected_idx].uri })
+		if is_mounted(mounts[selected_idx]) then
+			unmount_action(mounts[selected_idx])
+		end
+		-- Command("gio", { "mount", "-u", mounts[selected_idx].uri })
+		if mount.uri ~= mounts[selected_idx].uri then
+			local old_scheme, old_domain, old_user, _, old_prefix, old_port =
+				extract_domain_user_from_uri(mounts[selected_idx].uri)
+			if old_domain and old_scheme then
+				local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
+				if is_locked then
+					error(NOTIFY_MSG.SECRET_VAULT_LOCKED, " can't clear saved passwords")
+					return
+				else
+					if #secrets > 0 then
+						for _, secret in ipairs(secrets) do
+							clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)
+						end
+					end
+				end
+			end
+		end
 		mounts[selected_idx] = mount
 	else
 		table.insert(mounts, mount)
@@ -1080,7 +1387,25 @@ local function remove_mount_action()
 		return
 	end
 
-	run_command("gio", { "mount", "-u", mount.uri })
+	if is_mounted(mount) then
+		unmount_action(mount)
+	end
+	-- run_command("gio", { "mount", "-u", mount.uri })
+	local old_scheme, old_domain, old_user, _, old_prefix, old_port =
+		extract_domain_user_from_uri(mounts[selected_idx].uri)
+	if old_domain and old_scheme then
+		local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
+		if is_locked then
+			error(NOTIFY_MSG.SECRET_VAULT_LOCKED, " can't clear saved passwords")
+			return
+		else
+			if #secrets > 0 then
+				for _, secret in ipairs(secrets) do
+					clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)
+				end
+			end
+		end
+	end
 	table.remove(mounts, selected_idx)
 	set_state(STATE_KEY.MOUNTS, mounts)
 	save_mounts()
@@ -1089,6 +1414,12 @@ end
 ---setup function in yazi/init.lua
 ---@param opts {}
 function M:setup(opts)
+	if opts and opts.save_password_autoconfirm == true then
+		set_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM, true)
+	end
+	if opts and opts.enabled_keyring == false then
+		set_state(STATE_KEY.CMD_FOUND .. SECRET_TOOL, false)
+	end
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then
 		set_state(STATE_KEY.WHICH_KEYS, opts.which_keys)
 	end
@@ -1114,7 +1445,11 @@ end
 
 ---@param job {args: string[], args: {jump: boolean?, eject: boolean?}}
 function M:entry(job)
-	check_cmd_exist("gio")
+	if not is_cmd_exist("gio") then
+		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
+		return
+	end
+	is_cmd_exist(SECRET_TOOL)
 	local action = job.args[1]
 	-- Select a device then mount
 	if action == ACTION.SELECT_THEN_MOUNT then

@@ -147,7 +147,7 @@ require("gvfs"):setup({
   -- (Optional) disable/enable remember passwords using keyring. Default: true
   enabled_keyring = false,
   -- (Optional) save password automatically after mounting. Default: false
-	save_password_autoconfirm = true,
+  save_password_autoconfirm = true,
 })
 ```
 
@@ -185,23 +185,29 @@ prepend_keymap = [
 It's highly recommended to add these lines to your `~/.config/yazi/yazi.toml`,
 because GVFS is slow that can make yazi freeze when it preload and previews a large number of files.
 Replace `1000` with your real user id (run `id -u` to get user id).
+Replace `USER_NAME` with your real user name (run `id -nu` to get username).
 
 ```toml
 [plugin]
 preloaders = [
-  # Do not preload gvfs mount_point
+  # Do not preload files in mounted locations:
   # Environment variable won't work here.
   # Using absolute path instead.
   { name = "/run/user/1000/gvfs/**/*", run = "noop" },
+  # For mounted hard disk
+  { name = "/run/media/USER_NAME/**/*", run = "noop" },
   #... the rest of preloaders
 ]
 previewers = [
   # Allow to preview folder.
   { name = "*/", run = "folder", sync = true },
-  # Do not preview MTP mount_point (uncomment to except text file)
-  #  { mime = "{text/*,application/x-subrip}", run = "code" },
+  # Do not previewing files in mounted locations (uncomment to except text file):
+  # { mime = "{text/*,application/x-subrip}", run = "code" },
   # Using absolute path.
   { name = "/run/user/1000/gvfs/**/*", run = "noop" },
+
+  # For mounted hard disk.
+  { name = "/run/media/USER_NAME/**/*", run = "noop" },
   #... the rest of previewers
 ]
 ```

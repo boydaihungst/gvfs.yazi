@@ -1,13 +1,16 @@
 --- @since 25.5.28
 
 local M = {}
-local shell = os.getenv("SHELL") or ""
-local home = os.getenv("HOME") or ""
+local SHELL = os.getenv("SHELL") or ""
+local HOME = os.getenv("HOME") or ""
 local PLUGIN_NAME = "gvfs"
 
 local USER_ID = ya.uid()
 local USER_NAME = tostring(ya.user_name(USER_ID))
-local GVFS_ROOT_MOUNTPOINT = "/run/user/" .. tostring(USER_ID) .. "/gvfs"
+local XDG_RUNTIME_DIR = "/run/user/" .. USER_ID
+XDG_RUNTIME_DIR = os.getenv("XDG_RUNTIME_DIR") or XDG_RUNTIME_DIR
+
+local GVFS_ROOT_MOUNTPOINT = XDG_RUNTIME_DIR and (XDG_RUNTIME_DIR .. "/gvfs") or (HOME .. "/.gvfs")
 local GVFS_ROOT_MOUNTPOINT_FILE = "/run/media/" .. USER_NAME
 local SECRET_TOOL = "secret-tool"
 local SECRET_VAULT_VERSION = "1"
@@ -34,7 +37,7 @@ local NOTIFY_MSG = {
 	DISPLAY_NAME_CANT_BE_EMPTY = "Display name can't be empty",
 	MOUNT_ERROR_PASSWORD = 'Failed to mount "%s", please check your password',
 	MOUNT_ERROR_USERNAME = 'Failed to mount "%s", please check your username',
-	HEADLESS_DETECTED = 'GVFS.yazi can only run on DBUS session\nCheck "https://github.com/boydaihungst/gvfs.yazi/" for more information',
+	HEADLESS_DETECTED = "GVFS.yazi plugin can only run on DBUS session. Check github HEADLESS_WORKAROUND.md to enable DBUS session",
 	LIST_MOUNTS_EMPTY = "List mounts URI is empty",
 	RETRIVE_PASSWORD_SUCCESS = "Retrieved password from secret vault",
 	SAVE_PASSWORD_SUCCESS = "Saved password to secret vault",
@@ -73,6 +76,7 @@ local STATE_KEY = {
 	PREV_CWD = "PREV_CWD",
 	WHICH_KEYS = "WHICH_KEYS",
 	CMD_FOUND = "CMD_FOUND",
+	DBUS_SESSION = "DBUS_SESSION",
 	ROOT_MOUNTPOINT = "ROOT_MOUNTPOINT",
 	SAVE_PATH = "SAVE_PATH",
 	MOUNTS = "MOUNTS",
@@ -159,7 +163,13 @@ end)
 ---@return Error|nil, Output|nil
 local function run_command(cmd, args, _stdin)
 	local stdin = _stdin or Command.INHERIT
-	local child, cmd_err = Command(cmd):arg(args):stdin(stdin):stdout(Command.PIPED):stderr(Command.PIPED):spawn()
+	local child, cmd_err = Command(cmd)
+		:arg(args)
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+		:stdin(stdin)
+		:stdout(Command.PIPED)
+		:stderr(Command.PIPED)
+		:spawn()
 
 	if not child then
 		error("Failed to start `%s` with error: `%s`", cmd, cmd_err)
@@ -173,6 +183,16 @@ local function run_command(cmd, args, _stdin)
 	else
 		return nil, output
 	end
+end
+
+local function is_in_dbus_session()
+	local dbus_session = get_state(STATE_KEY.DBUS_SESSION)
+	if dbus_session == nil then
+		local cha, _ = fs.cha(Url(XDG_RUNTIME_DIR))
+		dbus_session = cha and true or false
+		set_state(STATE_KEY.DBUS_SESSION, dbus_session)
+	end
+	return dbus_session
 end
 
 local function is_cmd_exist(cmd)
@@ -348,6 +368,7 @@ local function is_secret_vault_locked()
 			PLUGIN_NAME,
 			SECRET_VAULT_VERSION,
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -387,6 +408,7 @@ local function search_password(protocol, user, domain, prefix, port)
 			prefix and "prefix" or nil,
 			prefix and prefix or nil,
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -413,7 +435,7 @@ local function save_password(password, protocol, user, domain, prefix, port)
 		return false
 	end
 
-	local res, err = Command(shell)
+	local res, err = Command(SHELL)
 		:arg({
 			"-c",
 			("printf %s " .. path_quote(password) .. " | ")
@@ -442,6 +464,7 @@ local function save_password(password, protocol, user, domain, prefix, port)
 				.. (port and (" port " .. port) or "")
 				.. (prefix and (" prefix " .. path_quote(prefix)) or ""),
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -473,6 +496,7 @@ local function lookup_password(protocol, user, domain, prefix, port)
 			prefix and "prefix" or nil,
 			prefix and prefix or nil,
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -504,6 +528,7 @@ local function clear_password(protocol, user, domain, prefix, port)
 			prefix and "prefix" or nil,
 			prefix and prefix or nil,
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -816,13 +841,14 @@ local function mount_device(opts)
 		end
 	end
 
-	local res, err = Command(shell)
+	local res, err = Command(SHELL)
 		:arg({
 			"-c",
 			(auth_string_format ~= "" and "printf " .. path_quote(auth_string_format) .. " " .. auths .. " | " or "")
 				.. " gio mount "
 				.. (device.uuid and ("-d " .. device.uuid) or path_quote(device.uri)),
 		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -1192,7 +1218,7 @@ local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url)
 	for _, tab in ipairs(cx.tabs) do
 		if tab.current.cwd:starts_with(unmounted_url) then
 			ya.emit("cd", {
-				home,
+				HOME,
 				tab = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,
 			})
 		end
@@ -1371,7 +1397,6 @@ local function add_or_edit_mount_action(is_edit)
 		if is_mounted(mounts[selected_idx]) then
 			unmount_action(mounts[selected_idx])
 		end
-		-- Command("gio", { "mount", "-u", mounts[selected_idx].uri })
 		if mount.uri ~= mounts[selected_idx].uri then
 			local old_scheme, old_domain, old_user, _, old_prefix, old_port =
 				extract_domain_user_from_uri(mounts[selected_idx].uri)
@@ -1467,6 +1492,12 @@ end
 function M:entry(job)
 	if not is_cmd_exist("gio") then
 		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
+		return
+	end
+	-- Disable if not in DBUS session
+	if not is_in_dbus_session() then
+		error(NOTIFY_MSG.HEADLESS_DETECTED)
+		set_state(STATE_KEY.CMD_FOUND .. SECRET_TOOL, false)
 		return
 	end
 	is_cmd_exist(SECRET_TOOL)

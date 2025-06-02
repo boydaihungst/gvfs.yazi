@@ -22,15 +22,15 @@ By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC prot
 For other protocols (smb, ftp, sftp, etc), add mount URIs using `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>). See more in the keymap below.
 
 > [!NOTE]
-
-- This plugin only supports Linux
-- Needs D-bus session to work. For headless session without D-bus session (Like connect to a computer via SSH, etc.) [Try this workaround: HEADLESS_WORKAROUND.md](./HEADLESS_WORKAROUND.md)
-
-- If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>), and then create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
-
-- Trash won't work on some protocols, use permanently delete instead.
-
-- SCHEMES URI shouldn't contain password, because it's saved as plaintext in `yazi/config/gvfs.private`.
+>
+> - This plugin only supports Linux
+> - Needs D-bus session to work. For headless session without D-bus session (Like connect to a computer via SSH, etc.) [Try this workaround: HEADLESS_WORKAROUND.md](./HEADLESS_WORKAROUND.md)
+>
+> - If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>), and then > create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
+>
+> - Trash won't work on some protocols, use permanently delete instead.
+>
+> - SCHEMES URI shouldn't contain password, because it's saved as plaintext in `yazi/config/gvfs.private`.
 
 ## Preview
 

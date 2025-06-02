@@ -1520,14 +1520,17 @@ function M:setup(opts)
 	if opts and opts.save_password_autoconfirm == true then
 		set_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM, true)
 	end
-	set_state(
-		STATE_KEY.PASSWORD_VAULT,
-		(opts and (opts.password_vault == PASSWORD_VAULT.KEYRING or opts.password_vault == PASSWORD_VAULT.PASS))
-			and opts.password_vault
-	)
-	-- TODO: REMOVE: backwards compatibility
-	if opts and opts.enabled_keyring == true then
-		set_state(STATE_KEY.PASSWORD_VAULT, PASSWORD_VAULT.KEYRING)
+	if opts and opts.password_vault then
+		set_state(
+			STATE_KEY.PASSWORD_VAULT,
+			(opts and (opts.password_vault == PASSWORD_VAULT.KEYRING or opts.password_vault == PASSWORD_VAULT.PASS))
+				and opts.password_vault
+		)
+	else
+		-- TODO: REMOVE: backwards compatibility
+		if opts and opts.enabled_keyring == true then
+			set_state(STATE_KEY.PASSWORD_VAULT, PASSWORD_VAULT.KEYRING)
+		end
 	end
 
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then

@@ -3,6 +3,7 @@
 <!--toc:start-->
 
 - [gvfs.yazi](#gvfsyazi)
+  - [Preview](#preview)
   - [Features](#features)
   - [Requirements](#requirements)
   - [Installation](#installation)
@@ -81,55 +82,11 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
    sudo pacman -S gvfs-mtp gvfs-afc gvfs-google gvfs-gphoto2 gvfs-nfs gvfs-smb gvfs-afc gvfs-dnssd gvfs-goa gvfs-onedrive gvfs-wsdd
    ```
 
-4. (Optional) Install `secret-tool` and `keyring` to store passwords to keyring.
-   If you don't want to re-enter passwords everytime connect to a saved mount URI (SMB, FTP, etc), you can install `keyring` and `secret-tool` to store passwords.
+4. For headless session
+   if you see `GVFS.yazi can only run on DBUS session` error, please refer to [HEADLESS_WORKAROUND.md](./HEADLESS_WORKAROUND.md) for a workaround.
 
-- Install `secret-tool`:
-
-  ```sh
-  # Ubuntu
-  sudo apt install libsecret-tools
-
-  # Fedora (Not tested, please report if it works)
-  sudo dnf install libsecret
-
-  # Arch
-  sudo pacman -S libsecret
-  ```
-
-- Install `GNOME-Keyring` (or KWallet with limitations, via a compatibility layer -> less reliable):
-
-  ```sh
-  # Ubuntu
-  sudo apt install gnome-keyring
-  # Ubuntu GNOME already starts the keyring daemon automatically.
-  # If you're using another DE or a window manager, see manual startup notes below.
-
-  # Fedora (Not tested, please report if it works)
-  sudo dnf install gnome-keyring
-  # Fedora Workstation (GNOME) starts the daemon automatically.
-  # If you're using another DE or a window manager, see manual startup notes below.
-
-  # Arch
-  sudo pacman -S gnome-keyring
-  sudo systemctl enable --now --user gnome-keyring-daemon
-  ```
-
-- Manual Startup `gnome-keyring` (for non-GNOME setups)
-  If you're using i3, Xfce, sway, or another WM:
-  Add this to your session startup (e.g., .xinitrc, ~/.xprofile, or your DE’s autostart system):
-
-  ```sh
-  # Start gnome-keyring
-  eval $(gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)
-  # or copy ~/.config/yazi/plugins/gvfs.yazi/assets/gnome-keyring-daemon.service to ~/.config/systemd/user and run:
-  systemctl --user enable --now gnome-keyring-daemon.service
-  ```
-
-For other distros please ask gemini/chatgpt.
-
-> [!IMPORTANT]
-> If you want to clear saved passwords, you can run `secret-tool clear gvfs 1` in your terminal.
+5. (Optional) Store passwords to password store (pass + GPG or secret-tool + keyring)
+   Click here to setup password store: [SECURE_SAVED_PASSWORD.md](./SECURE_SAVED_PASSWORD.md)
 
 ## Installation
 
@@ -148,8 +105,9 @@ require("gvfs"):setup({
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private"
 
-  -- (Optional) disable/enable remember passwords using keyring. Default: true
-  enabled_keyring = false,
+  -- (Optional) Select where to save passwords. Default: nil
+  -- Available options: "keyring", "pass", or nil
+  password_vault = "keyring",
   -- (Optional) save password automatically after mounting. Default: false
   save_password_autoconfirm = true,
 })

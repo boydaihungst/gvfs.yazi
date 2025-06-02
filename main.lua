@@ -7,12 +7,13 @@ local PLUGIN_NAME = "gvfs"
 
 local USER_ID = ya.uid()
 local USER_NAME = tostring(ya.user_name(USER_ID))
-local XDG_RUNTIME_DIR = "/run/user/" .. USER_ID
-XDG_RUNTIME_DIR = os.getenv("XDG_RUNTIME_DIR") or XDG_RUNTIME_DIR
+local XDG_RUNTIME_DIR = os.getenv("XDG_RUNTIME_DIR") or ("/run/user/" .. USER_ID)
 
 local GVFS_ROOT_MOUNTPOINT = XDG_RUNTIME_DIR and (XDG_RUNTIME_DIR .. "/gvfs") or (HOME .. "/.gvfs")
 local GVFS_ROOT_MOUNTPOINT_FILE = "/run/media/" .. USER_NAME
 local SECRET_TOOL = "secret-tool"
+local GPG_TOOL = "gpg"
+local PASS_TOOL = "pass"
 local SECRET_VAULT_VERSION = "1"
 
 ---@enum NOTIFY_MSG
@@ -43,6 +44,12 @@ local NOTIFY_MSG = {
 	SAVE_PASSWORD_SUCCESS = "Saved password to secret vault",
 	SAVE_PASSWORD_FAILED = "Save password failed: %s",
 	SECRET_VAULT_LOCKED = "Secret vault is locked%s",
+}
+
+---@enum PASSWORD_VAULT
+local PASSWORD_VAULT = {
+	KEYRING = "keyring",
+	PASS = "pass",
 }
 
 ---@enum DEVICE_CONNECT_STATUS
@@ -80,8 +87,9 @@ local STATE_KEY = {
 	ROOT_MOUNTPOINT = "ROOT_MOUNTPOINT",
 	SAVE_PATH = "SAVE_PATH",
 	MOUNTS = "MOUNTS",
-	ENABLED_KEYRING = "ENABLED_KEYRING",
 	SAVE_PASSWORD_AUTOCONFIRM = "SAVE_PASSWORD_AUTOCONFIRM",
+	PASSWORD_VAULT = "PASSWORD_VAULT",
+	KEY_GRIP = "KEY_GRIP",
 }
 
 ---@enum ACTION
@@ -283,155 +291,100 @@ local function path_quote(path)
 	return result
 end
 
----@param secret_tool_output string
----@return {id: string?, retrieval_error: string?, locked: boolean, attributes: {[string]: string}}[]
-local function parse_secret_tool_search_output(secret_tool_output)
-	local secrets = {}
-	local current_secret = nil
-	local last_retrieval_error = nil
-	local last_locked_error = false
-
-	for line in string.gmatch(secret_tool_output, "[^\r\n]+") do
-		-- Trim leading/trailing whitespace from the line
-		line = line:match("^%s*(.-)%s*$")
-
-		if line == "" then
-			-- Ignore empty lines
-			goto continue
-		end
-
-		-- Check for the specific "Cannot get secret" error
-		if line:match("^secret%-tool: Cannot get secret of a locked object$") then
-			last_retrieval_error = line
-			last_locked_error = true
-			goto continue
-		end
-
-		-- Check for a new secret entry marker, e.g., [/3]
-		local id_match = line:match("^%[/(%d+)%]$")
-		if id_match then
-			-- If there was a pending secret, store it
-			if current_secret then
-				table.insert(secrets, current_secret)
-			end
-			-- Start a new secret object
-			current_secret = {
-				id = id_match,
-				attributes = {}, -- Initialize attributes table
-				locked = last_locked_error,
-			}
-			-- If there was a pending "locked object" error, associate it
-			if last_retrieval_error then
-				current_secret.retrieval_error = last_retrieval_error
-				last_retrieval_error = nil -- Error has been consumed
-			end
-			last_locked_error = false -- Error has been consumed
-			goto continue
-		end
-
-		-- If we are inside a secret entry, parse key-value pairs
-		if current_secret then
-			local key, value = line:match("^([^=]+)%s*=%s*(.+)$")
-			if key and value then
-				-- Trim whitespace from key and value parts
-				key = key:match("^%s*(.-)%s*$")
-				value = value:match("^%s*(.-)%s*$")
-
-				local attr_key = key:match("^attribute%.(.+)$")
-				if attr_key then
-					current_secret.attributes[attr_key] = value
-				else
-					current_secret[key] = value
-				end
-			else
-			end
-		end
-
-		::continue::
-	end
-
-	-- Add the last processed secret if it exists
-	if current_secret then
-		table.insert(secrets, current_secret)
-	end
-
-	return secrets
-end
-
-local function is_secret_vault_locked()
-	if not is_cmd_exist(SECRET_TOOL) then
-		return true
-	end
+local function is_secret_vault_available_keyring(unlock_vault_dialog)
 	local res, err = Command(SECRET_TOOL)
 		:arg({
 			"search",
 			PLUGIN_NAME,
 			SECRET_VAULT_VERSION,
+			unlock_vault_dialog and "--unlock" or nil,
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	return err
-		or (
-			res
-			and res.stderr
-			and (
-				res.stderr:match("secret%-tool: Cannot get secret of a locked object")
-				or res.stderr:match("secret%-tool: The name is not activatable")
-				or res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus")
-			)
-		)
+
+	if err or (res and res.stderr and res.stderr:match("^secret%-tool")) then
+		return false
+	end
+	return true
 end
 
----@return {id: string?, retrieval_error: string?, locked: boolean, attributes: {[string]: string}}[], boolean
-local function search_password(protocol, user, domain, prefix, port)
-	if not is_cmd_exist(SECRET_TOOL) then
-		return {}, false
-	end
+local function build_secret_vault_entry_gpg(protocol, user, domain, prefix, port)
+	protocol = protocol and ("/" .. protocol) or ""
+	user = user and ("/" .. user) or ""
+	domain = domain and ("/" .. domain) or ""
+	prefix = prefix and ("/" .. prefix) or ""
+	port = port and ("/" .. port) or ""
+	return PLUGIN_NAME .. "/" .. SECRET_VAULT_VERSION .. protocol .. user .. domain .. port .. prefix
+end
 
-	local res, err = Command(SECRET_TOOL)
+local function is_secret_vault_available_gpg(unlock_vault_dialog, is_second_run)
+	local test_vault_entry = build_secret_vault_entry_gpg("test")
+	local res, err = Command(SHELL)
 		:arg({
-			"search",
-			"--all",
-			"--unlock",
-			PLUGIN_NAME,
-			SECRET_VAULT_VERSION,
-			protocol and "protocol" or nil,
-			protocol and protocol or nil,
-			user and "user" or nil,
-			user and user or nil,
-			domain and "domain" or nil,
-			domain and domain or nil,
-			port and "port" or nil,
-			port and port or nil,
-			prefix and "prefix" or nil,
-			prefix and prefix or nil,
+			"-c",
+			"gpg-connect-agent 'keyinfo " .. get_state(STATE_KEY.KEY_GRIP) .. "' /bye",
 		})
-		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
+
 	if res then
-		if res.stderr then
-			if res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
-				error(NOTIFY_MSG.SECRET_VAULT_LOCKED)
-				return {}, true
-			elseif res.stderr:match("secret%-tool: The name is not activatable") then
-				return {}, false
-			elseif res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus") then
-				return {}, false
+		-- Case unlocked
+		-- S KEYINFO CE3CD21A3A0DCB5EF57B4494AC37127EB207DE6A D - - - P - - -
+		-- S KEYINFO 56FB5F16C444102573EF8F1FB666AE48CD39CB4C D - - - C - - -
+		if res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ 1 ") or res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ .+ C ") then
+			return true
+		elseif unlock_vault_dialog and res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ - ") then
+			-- Display gpg unlock TUI window
+			local permit = ya.hide()
+			-- Wrap in shell to capture exit code
+			local full_cmd = string.format("bash -c '%s; echo __EXIT__$?__'", "pass " .. test_vault_entry .. " 2>&1")
+			local handle = io.popen(full_cmd)
+			local output = handle:read("*a")
+			handle:close()
+
+			-- Extract exit code
+			local exit_code = tonumber(output:match("__EXIT__(%d+)__"))
+			output = output:gsub("__EXIT__%d+__", ""):gsub("%s+$", "") -- clean output
+			permit:drop()
+			if output:match("Error: .* is not in the password store") then
+				res, err = Command(SHELL)
+					:arg({
+						"-c",
+						("printf '%s\n%s\n' " .. path_quote("test") .. " " .. path_quote("test") .. " | ")
+							.. PASS_TOOL
+							.. " insert "
+							.. " -f "
+							.. path_quote(test_vault_entry),
+					})
+					:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+					:stderr(Command.PIPED)
+					:stdout(Command.PIPED)
+					:output()
+				if is_second_run or err or (res and res.status and not res.status.success) then
+					return false
+				end
+				return is_secret_vault_available_gpg(unlock_vault_dialog, true)
 			end
+			return exit_code == 0
 		end
 	end
-	if res and res.status and res.status.success then
-		return parse_secret_tool_search_output(res.stdout .. res.stderr), false
-	end
-	return {}, false
+	return false
 end
--- secret-tool lookup protocol user domain prefix port
-local function save_password(password, protocol, user, domain, prefix, port)
-	if not user or not password or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
+
+local function is_secret_vault_available(unlock_vault_dialog)
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
+		return is_secret_vault_available_keyring(unlock_vault_dialog)
+	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
+		return is_secret_vault_available_gpg(unlock_vault_dialog)
+	end
+	return nil
+end
+
+local function save_password_keyring(password, protocol, user, domain, prefix, port)
+	if not user or not password or not protocol or not domain then
 		return false
 	end
 
@@ -468,7 +421,19 @@ local function save_password(password, protocol, user, domain, prefix, port)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	if err then
+	if res and res.stderr then
+		if res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
+			error(NOTIFY_MSG.SECRET_VAULT_LOCKED)
+			return false
+		elseif res.stderr:match("secret%-tool: The name is not activatable") then
+			error(NOTIFY_MSG.HEADLESS_DETECTED)
+			return false
+		elseif res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus") then
+			error(NOTIFY_MSG.HEADLESS_DETECTED)
+			return false
+		end
+	end
+	if err or (res and res.stderr) then
 		error(NOTIFY_MSG.SAVE_PASSWORD_FAILED, res and res.stderr or err)
 		return false
 	end
@@ -476,8 +441,44 @@ local function save_password(password, protocol, user, domain, prefix, port)
 	return true
 end
 
-local function lookup_password(protocol, user, domain, prefix, port)
-	if not user or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
+local function save_password_gpg(password, protocol, user, domain, prefix, port)
+	if not user or not password or not protocol or not domain then
+		return false
+	end
+
+	local res, err = Command(SHELL)
+		:arg({
+			"-c",
+			("printf '%s\n%s\n' " .. path_quote(password) .. " " .. path_quote(password) .. " | ")
+				.. PASS_TOOL
+				.. " insert "
+				.. " -f "
+				.. path_quote(build_secret_vault_entry_gpg(protocol, user, domain, prefix, port)),
+		})
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+
+	if err or (res and res.status and not res.status.success) then
+		error(NOTIFY_MSG.SAVE_PASSWORD_FAILED, res and res.stderr or err)
+		return false
+	end
+
+	info(NOTIFY_MSG.SAVE_PASSWORD_SUCCESS)
+	return true
+end
+
+local function save_password(password, protocol, user, domain, prefix, port)
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
+		return save_password_keyring(password, protocol, user, domain, prefix, port)
+	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
+		return save_password_gpg(password, protocol, user, domain, prefix, port)
+	end
+	return false
+end
+
+local function lookup_password_keyring(protocol, user, domain, prefix, port)
+	if not user or not protocol or not domain then
 		return nil
 	end
 	local res, err = Command(SECRET_TOOL)
@@ -507,22 +508,46 @@ local function lookup_password(protocol, user, domain, prefix, port)
 	return nil
 end
 
-local function clear_password(protocol, user, domain, prefix, port)
-	if not user or not protocol or not domain or not is_cmd_exist(SECRET_TOOL) then
-		return false
+local function lookup_password_gpg(protocol, user, domain, prefix, port)
+	if not user or not protocol or not domain then
+		return nil
+	end
+	local res, err = Command(PASS_TOOL)
+		:arg({
+			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port),
+		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if not err and res and res.status and res.status.success then
+		return res.stdout
 	end
 
+	return nil
+end
+
+local function lookup_password(protocol, user, domain, prefix, port)
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
+		return lookup_password_keyring(protocol, user, domain, prefix, port)
+	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
+		return lookup_password_gpg(protocol, user, domain, prefix, port)
+	end
+	return nil
+end
+
+local function clear_password_keyring(protocol, user, domain, prefix, port)
 	local res, err = Command(SECRET_TOOL)
 		:arg({
 			"clear",
 			PLUGIN_NAME,
 			SECRET_VAULT_VERSION,
-			"protocol",
-			protocol,
-			"user",
-			user,
-			"domain",
-			domain,
+			protocol and "protocol" or nil,
+			protocol and protocol or nil,
+			user and "user" or nil,
+			user and user or nil,
+			domain and "domain" or nil,
+			domain and domain or nil,
 			port and "port" or nil,
 			port and port or nil,
 			prefix and "prefix" or nil,
@@ -532,8 +557,49 @@ local function clear_password(protocol, user, domain, prefix, port)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
+	if res and res.stderr then
+		if res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
+			error(NOTIFY_MSG.SECRET_VAULT_LOCKED)
+			return false
+		elseif res.stderr:match("secret%-tool: The name is not activatable") then
+			error(NOTIFY_MSG.HEADLESS_DETECTED)
+			return false
+		elseif res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus") then
+			error(NOTIFY_MSG.HEADLESS_DETECTED)
+			return false
+		end
+	end
+
 	if not err and res and res.status and res.status.success then
 		return true
+	end
+	return false
+end
+
+local function clear_password_gpg(protocol, user, domain, prefix, port)
+	-- pass rm -r -f gvfs/test1
+	local res, err = Command(PASS_TOOL)
+		:arg({
+			"rm",
+			"-r",
+			"-f",
+			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port),
+		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if not err and res and res.status and res.status.success then
+		return true
+	end
+	return false
+end
+
+local function clear_password(protocol, user, domain, prefix, port)
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
+		return clear_password_keyring(protocol, user, domain, prefix, port)
+	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
+		return clear_password_gpg(protocol, user, domain, prefix, port)
 	end
 	return false
 end
@@ -812,7 +878,7 @@ local function is_mounted(device)
 end
 
 ---mount mtp device
----@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean,max_retry?: integer, retries?: integer}
+---@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
 local function mount_device(opts)
 	local device = opts.device
@@ -820,6 +886,7 @@ local function mount_device(opts)
 	local retries = opts.retries or 0
 	local password = opts.password
 	local is_pw_saved = opts.is_pw_saved
+	local skipped_secret_vault = opts.skipped_secret_vault
 	local username = opts.username
 	local error_msg = nil
 
@@ -857,25 +924,23 @@ local function mount_device(opts)
 
 	if mount_success then
 		info(NOTIFY_MSG.MOUNT_SUCCESS, device.name)
-		if password and not is_pw_saved and is_cmd_exist(SECRET_TOOL) then
-			if not is_secret_vault_locked() then
-				local confirmed_save_password = get_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM)
-					or ya.confirm({
-						title = ui.Line("Remember password?"):style(th.confirm.title),
-						content = ui.Text({
-							ui.Line(""),
-							ui.Line("Press Yes to save password to keyring."):style(th.confirm.content),
-							ui.Line(""),
-						})
-							:align(ui.Align.CENTER)
-							:wrap(ui.Text.WRAP),
-						pos = { "center", w = 70, h = 10 },
+		if password and not is_pw_saved and not skipped_secret_vault and is_secret_vault_available() then
+			local confirmed_save_password = get_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM)
+				or ya.confirm({
+					title = ui.Line("Remember password?"):style(th.confirm.title),
+					content = ui.Text({
+						ui.Line(""),
+						ui.Line("Press Yes to save password to secret vault."):style(th.confirm.content),
+						ui.Line(""),
 					})
+						:align(ui.Align.CENTER)
+						:wrap(ui.Text.WRAP),
+					pos = { "center", w = 70, h = 10 },
+				})
 
-				if confirmed_save_password then
-					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-					save_password(password, scheme, username or user, domain, prefix, port)
-				end
+			if confirmed_save_password then
+				local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+				save_password(password, scheme, username or user, domain, prefix, port)
 			end
 		end
 		return true
@@ -901,15 +966,18 @@ local function mount_device(opts)
 				end
 			end
 			if stdout:find("\nPassword: \n") or stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
-				if
-					is_cmd_exist(SECRET_TOOL)
-					and (username ~= opts.username or (username == nil and is_pw_saved == nil))
-				then
-					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-					password = lookup_password(scheme, username or user, domain, prefix, port)
-					is_pw_saved = password ~= nil
-					if is_pw_saved then
-						info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
+				if username ~= opts.username or (username == nil and is_pw_saved == nil) then
+					-- Prevent showing gpg passphrase twice
+					if not is_secret_vault_available(true) then
+						skipped_secret_vault = true
+					end
+					if not skipped_secret_vault then
+						local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+						password = lookup_password(scheme, username or user, domain, prefix, port)
+						is_pw_saved = password ~= nil
+						if is_pw_saved then
+							info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
+						end
 					end
 				end
 				if retries < max_retry then
@@ -945,6 +1013,7 @@ local function mount_device(opts)
 		max_retry = max_retry,
 		password = password,
 		is_pw_saved = is_pw_saved,
+		skipped_secret_vault = skipped_secret_vault,
 		username = username,
 	})
 end
@@ -1400,15 +1469,8 @@ local function add_or_edit_mount_action(is_edit)
 		if mount.uri ~= mounts[selected_idx].uri then
 			local old_scheme, old_domain, old_user, _, old_prefix, old_port =
 				extract_domain_user_from_uri(mounts[selected_idx].uri)
-			if old_domain and old_scheme then
-				local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
-				if not is_locked then
-					if #secrets > 0 then
-						for _, secret in ipairs(secrets) do
-							clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)
-						end
-					end
-				end
+			if old_domain and old_scheme and is_secret_vault_available(true) then
+				clear_password(old_scheme, old_user, old_domain, old_prefix, old_port)
 			end
 		end
 		mounts[selected_idx] = mount
@@ -1440,15 +1502,8 @@ local function remove_mount_action()
 	-- run_command("gio", { "mount", "-u", mount.uri })
 	local old_scheme, old_domain, old_user, _, old_prefix, old_port =
 		extract_domain_user_from_uri(mounts[selected_idx].uri)
-	if old_domain and old_scheme then
-		local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
-		if not is_locked then
-			if #secrets > 0 then
-				for _, secret in ipairs(secrets) do
-					clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)
-				end
-			end
-		end
+	if old_domain and old_scheme and is_secret_vault_available(true) then
+		clear_password(old_scheme, old_user, old_domain, old_prefix, old_port)
 	end
 	local removed_mount = table.remove(mounts, selected_idx)
 	set_state(STATE_KEY.MOUNTS, mounts)
@@ -1459,12 +1514,22 @@ end
 ---setup function in yazi/init.lua
 ---@param opts {}
 function M:setup(opts)
+	if opts and opts.key_grip then
+		set_state(STATE_KEY.KEY_GRIP, opts.key_grip)
+	end
 	if opts and opts.save_password_autoconfirm == true then
 		set_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM, true)
 	end
-	if opts and opts.enabled_keyring == false then
-		set_state(STATE_KEY.CMD_FOUND .. SECRET_TOOL, false)
+	set_state(
+		STATE_KEY.PASSWORD_VAULT,
+		(opts and (opts.password_vault == PASSWORD_VAULT.KEYRING or opts.password_vault == PASSWORD_VAULT.PASS))
+			and opts.password_vault
+	)
+	-- TODO: REMOVE: backwards compatibility
+	if opts and opts.enabled_keyring == true then
+		set_state(STATE_KEY.PASSWORD_VAULT, PASSWORD_VAULT.KEYRING)
 	end
+
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then
 		set_state(STATE_KEY.WHICH_KEYS, opts.which_keys)
 	end
@@ -1494,13 +1559,22 @@ function M:entry(job)
 		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
 		return
 	end
-	-- Disable if not in DBUS session
+	-- Fallback to pass if in headless session
 	if not is_in_dbus_session() then
 		error(NOTIFY_MSG.HEADLESS_DETECTED)
-		set_state(STATE_KEY.CMD_FOUND .. SECRET_TOOL, false)
 		return
 	end
-	is_cmd_exist(SECRET_TOOL)
+
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
+		if not is_cmd_exist(SECRET_TOOL) then
+			set_state(STATE_KEY.PASSWORD_VAULT, nil)
+		end
+	end
+	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
+		if not is_cmd_exist(GPG_TOOL) or not is_cmd_exist(PASS_TOOL) or get_state(STATE_KEY.KEY_GRIP) == nil then
+			set_state(STATE_KEY.PASSWORD_VAULT, nil)
+		end
+	end
 	local action = job.args[1]
 	-- Select a device then mount
 	if action == ACTION.SELECT_THEN_MOUNT then

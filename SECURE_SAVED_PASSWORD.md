@@ -143,6 +143,7 @@ For other distros please ask gemini/chatgpt.
 - Initialize the password store:
 
   ```bash
+  # Re-run this with new <KEY_ID>, saved passwords will auto transfer to new one.
   pass init <KEY_ID>
   ```
 

@@ -34,6 +34,7 @@ local NOTIFY_MSG = {
 	DISPLAY_NAME_CANT_BE_EMPTY = "Display name can't be empty",
 	MOUNT_ERROR_PASSWORD = 'Failed to mount "%s", please check your password',
 	MOUNT_ERROR_USERNAME = 'Failed to mount "%s", please check your username',
+	HEADLESS_DETECTED = 'GVFS.yazi can only run on DBUS session\nCheck "https://github.com/boydaihungst/gvfs.yazi/" for more information',
 	LIST_MOUNTS_EMPTY = "List mounts URI is empty",
 	RETRIVE_PASSWORD_SUCCESS = "Retrieved password from secret vault",
 	SAVE_PASSWORD_SUCCESS = "Saved password to secret vault",
@@ -350,20 +351,22 @@ local function is_secret_vault_locked()
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	if err or (res and res.stderr and res.stderr:match("secret%-tool: Cannot get secret of a locked object")) then
-		return true
-	end
-	if res and res.status and res.stderr:match("secret%-tool: The name is not activatable") then
-		return true
-	end
-
-	return false
+	return err
+		or (
+			res
+			and res.stderr
+			and (
+				res.stderr:match("secret%-tool: Cannot get secret of a locked object")
+				or res.stderr:match("secret%-tool: The name is not activatable")
+				or res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus")
+			)
+		)
 end
 
 ---@return {id: string?, retrieval_error: string?, locked: boolean, attributes: {[string]: string}}[], boolean
 local function search_password(protocol, user, domain, prefix, port)
 	if not is_cmd_exist(SECRET_TOOL) then
-		return {}, true
+		return {}, false
 	end
 
 	local res, err = Command(SECRET_TOOL)
@@ -387,16 +390,22 @@ local function search_password(protocol, user, domain, prefix, port)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	if res and res.stderr and res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
-		return {}, true
+	if res then
+		if res.stderr then
+			if res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
+				error(NOTIFY_MSG.SECRET_VAULT_LOCKED)
+				return {}, true
+			elseif res.stderr:match("secret%-tool: The name is not activatable") then
+				return {}, false
+			elseif res.stderr:match("secret%-tool: Cannot autolaunch D%-Bus") then
+				return {}, false
+			end
+		end
 	end
 	if res and res.status and res.status.success then
 		return parse_secret_tool_search_output(res.stdout .. res.stderr), false
 	end
-	if res and res.status and res.stderr:match("secret%-tool: The name is not activatable") then
-		return {}, false
-	end
-	return {}, true
+	return {}, false
 end
 -- secret-tool lookup protocol user domain prefix port
 local function save_password(password, protocol, user, domain, prefix, port)
@@ -845,6 +854,10 @@ local function mount_device(opts)
 		end
 		return true
 	elseif res and res.status.code == 2 then
+		if res.stderr:match(".*volume doesn’t implement mount.*") then
+			error_msg = string.format(NOTIFY_MSG.HEADLESS_DETECTED)
+			retries = 3
+		end
 		if res.stdout:find("Authentication Required") then
 			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
 			if stdout:find("\nUser: \n") then
@@ -1364,10 +1377,7 @@ local function add_or_edit_mount_action(is_edit)
 				extract_domain_user_from_uri(mounts[selected_idx].uri)
 			if old_domain and old_scheme then
 				local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
-				if is_locked then
-					error(NOTIFY_MSG.SECRET_VAULT_LOCKED, " can't clear saved passwords")
-					return
-				else
+				if not is_locked then
 					if #secrets > 0 then
 						for _, secret in ipairs(secrets) do
 							clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)
@@ -1407,10 +1417,7 @@ local function remove_mount_action()
 		extract_domain_user_from_uri(mounts[selected_idx].uri)
 	if old_domain and old_scheme then
 		local secrets, is_locked = search_password(old_scheme, old_user, old_domain, old_prefix, old_port)
-		if is_locked then
-			error(NOTIFY_MSG.SECRET_VAULT_LOCKED, " can't clear saved passwords")
-			return
-		else
+		if not is_locked then
 			if #secrets > 0 then
 				for _, secret in ipairs(secrets) do
 					clear_password(old_scheme, secret.attributes.user, old_domain, old_prefix, old_port)

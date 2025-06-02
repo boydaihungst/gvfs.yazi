@@ -18,12 +18,13 @@ You need to install corresponding packages to use them.
 Tested: MTP, Hard disk/drive, GPhoto2 (PTP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC protocols or mount URIs for other protocols.
-For other protocols (smb, ftp, sftp, etc), add mount URIs using `add-mount` action. See more in the keymap below.
+For other protocols (smb, ftp, sftp, etc), add mount URIs using `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>). See more in the keymap below.
 
-NOTE:
+> [!NOTE]
 
-- If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>),
-  and then create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
+- This plugin only supports Linux, needs D-bus session and won't work with headless mode (Like via SSH, etc.)
+
+- If you have any problems with protocol, please manually mount the device with `gio mount SCHEMES`. [Select Scheme from here](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>), and then create an issue with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ`
 
 - Trash won't work on some protocols, use permanently delete instead.
 
@@ -47,14 +48,13 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
 - (Optional) Remember passwords using keyring (need `secret-tool` and `keyring` installed)
 
 > [!NOTE]
-> There is a bug with yazi, which prevent mounted folders refreshing, after unmount
-> Just move up and down the folder tree to refresh the mounted folders
+> There is a bug with yazi, which prevent mounted folders from refreshing after unmounted.
 
 ## Requirements
 
 1. [yazi >= 25.5.28](https://github.com/sxyazi/yazi)
 
-2. This plugin only supports Linux, and requires having [GLib](https://github.com/GNOME/glib), [gvfs](https://gitlab.gnome.org/GNOME/gvfs)
+2. This plugin only supports Linux, and requires having [GLib](https://github.com/GNOME/glib), [gvfs](https://gitlab.gnome.org/GNOME/gvfs) (need D-Bus Session)
 
    ```sh
    # Ubuntu
@@ -80,7 +80,7 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
    sudo pacman -S gvfs-mtp gvfs-afc gvfs-google gvfs-gphoto2 gvfs-nfs gvfs-smb gvfs-afc gvfs-dnssd gvfs-goa gvfs-onedrive gvfs-wsdd
    ```
 
-4. (Optional) Install `secret-tool` and `keyring` to store passwords to keyring. (need GUI/D-Bus Session)
+4. (Optional) Install `secret-tool` and `keyring` to store passwords to keyring.
    If you don't want to re-enter passwords everytime connect to a saved mount URI (SMB, FTP, etc), you can install `keyring` and `secret-tool` to store passwords.
 
 - Install `secret-tool`:
@@ -126,6 +126,9 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
   ```
 
 For other distros please ask gemini/chatgpt.
+
+> [!IMPORTANT]
+> If you want to clear saved passwords, you can run `secret-tool clear gvfs 1` in your terminal.
 
 ## Installation
 

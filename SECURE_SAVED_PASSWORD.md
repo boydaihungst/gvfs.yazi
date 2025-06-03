@@ -7,7 +7,7 @@
   - [Method 2. Use `pass` (Password Store) with `GPG` encryption subkey](#method-2-use-pass-password-store-with-gpg-encryption-subkey)
   <!--toc:end-->
 
-If you don't want to re-enter passwords everytime connect to a saved mount URI (SMB, FTP, etc), you can use `Keyring` + `secret-tool` or `pass` + `GPG` to store passwords. `Keyring` can only be use in GUI session, `GPG` can use in both TUI and GUI session.
+If you don't want to re-enter passwords everytime connect to a saved scheme/mount URI (SMB, FTP, etc), you can use `Keyring` + `secret-tool` or `pass` + `GPG` to store passwords. `Keyring` can only be use in GUI session, `GPG` can use in both Headless and GUI session.
 
 ## Method 1. Use `secret-tool` with `Keyring` (Gnome Keyring or KWallet).
 
@@ -27,7 +27,7 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
   sudo pacman -S libsecret
   ```
 
-- Install `GNOME-Keyring` (or KWallet with limitations, via a compatibility layer -> less reliable):
+- Install `GNOME-Keyring` (or KWallet)
 
   ```sh
   # Ubuntu
@@ -47,7 +47,7 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
 
   For other distros please ask gemini/chatgpt.
 
-- Manual Startup `gnome-keyring` other distros if need
+- Manual Startup `gnome-keyring` if need
   Check if it's running: `pgrep -fl gnome-keyring-daemon`. Skip this step if it's already running.
   If you're using i3, Xfce, sway, hyprland or another WM. [Read more](<https://wiki.archlinux.org/title/GNOME/Keyring#Using_gnome-keyring-daemon_outside_desktop_environments_(KDE,_GNOME,_XFCE,_...)>)
   Add this to your session startup (e.g., .xinitrc, ~/.xprofile, or your DE’s autostart system):
@@ -64,16 +64,16 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
   systemctl --user enable --now gnome-keyring-daemon.service
   ```
 
-- Add `password_vault` to setup function in `~/.config/yazi/init.lua`:
+- Add `password_vault = "keyring"` to setup function in `~/.config/yazi/init.lua`:
 
 ```lua
 require("gvfs"):setup({
-  key_grip = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   password_vault = "keyring",
 })
 ```
 
-Now you can use gvfs.yazi and save passwords to the keyring. You only need to unlock the keyring once after login or after trigger gvfs.yazi plugin.
+Now you can use gvfs.yazi and save passwords to the keyring.
+You only need to unlock the keyring once after login or after trigger gvfs.yazi plugin.
 
 - You can also auto unlock the keyring with PAM:
   - [Gnome Keyring Auto Unlock on login](https://wiki.archlinux.org/title/GNOME/Keyring#Using_the_keyring)
@@ -89,9 +89,8 @@ secret-tool clear gvfs 1
 
 ## Method 2. Use `pass` (Password Store) with `GPG` encryption subkey
 
-Can use on both GUI and headless session (Like connect to a computer via SSH, etc).
-
 The only option for headless users.
+Can use on both GUI and headless session (non-active console, Like connect to a computer via SSH, etc).
 
 - Install `pass` and `gpg`
 
@@ -106,7 +105,7 @@ The only option for headless users.
   sudo pacman -S pass gnupg
   ```
 
-For other distros please ask gemini/chatgpt.
+  For other distros please ask gemini/chatgpt.
 
 - Create a GPG key for encryption (Ignore if you already have a GPG key)
 
@@ -157,8 +156,9 @@ For other distros please ask gemini/chatgpt.
   ```
 
 > [!IMPORTANT]
-> Without `key_grip` and `password_vault = "pass"`, gvfs.yazi won't be able to save passwords to the password store.
+> Using `password_vault = "pass"` without `key_grip`, gvfs.yazi won't be able to save passwords to the password store.
 > GPG Keygrip IS NOT secret and does not need to be kept private.
+> So you can share your config file without worrying about leaking your passwords.
 
 Now you can use gvfs.yazi and save passwords to the password store.
 To increase the time gpg-agent cache the passwords: https://wiki.archlinux.org/title/GnuPG#Cache_passwords
@@ -169,6 +169,6 @@ To increase the time gpg-agent cache the passwords: https://wiki.archlinux.org/t
 ```bash
 # Clear all saved passwords
 pass rm -r gvfs -f
-# Kill gpg-agent if needed
+# Reset unlock state of GPG key
 gpgconf --kill gpg-agent
 ```

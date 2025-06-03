@@ -239,6 +239,7 @@ end)
 ---@enum PUBSUB_KIND
 local PUBSUB_KIND = {
 	mounts_changed = "@" .. PLUGIN_NAME .. "-" .. "mounts-changed",
+	unmounted = PLUGIN_NAME .. "-" .. "unmounted",
 }
 
 --- broadcast through pub sub to other instances
@@ -1280,9 +1281,13 @@ local save_tab_hovered = ya.sync(function()
 	return hovered_item_per_tab
 end)
 
-local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url)
+local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url, notify)
 	if not unmounted_url or unmounted_url == "" then
 		return
+	end
+	-- broadcast to other instances
+	if notify then
+		broadcast(PUBSUB_KIND.unmounted, unmounted_url)
 	end
 	for _, tab in ipairs(cx.tabs) do
 		if tab.current.cwd:starts_with(unmounted_url) then
@@ -1317,11 +1322,11 @@ local function unmount_action(device, eject)
 
 	local mount_path = get_mount_path(selected_device)
 	if selected_device.uuid then
-		redirect_unmounted_tab_to_home(mount_path)
+		redirect_unmounted_tab_to_home(mount_path, true)
 	end
 	local success = unmount_gvfs(selected_device, eject)
 	if success and not selected_device.uuid then
-		redirect_unmounted_tab_to_home(mount_path)
+		redirect_unmounted_tab_to_home(mount_path, true)
 		-- cd to home for all tabs within the device, and then restore the tabs location
 	end
 end
@@ -1379,7 +1384,7 @@ local save_mounts = function()
 		error(NOTIFY_MSG.CANT_CREATE_SAVE_FOLDER, tostring(save_path.parent))
 	end
 
-	-- save prefs to file
+	-- save mounts to file
 	if save_path_created then
 		local _, err_write = fs.write(save_path, ya.json_encode(mounts))
 		if err_write then
@@ -1553,6 +1558,9 @@ function M:setup(opts)
 
 	ps.sub_remote(PUBSUB_KIND.mounts_changed, function(mounts)
 		set_state(STATE_KEY.MOUNTS, mounts)
+	end)
+	ps.sub_remote(PUBSUB_KIND.unmounted, function(unmounted_url)
+		redirect_unmounted_tab_to_home(unmounted_url)
 	end)
 end
 

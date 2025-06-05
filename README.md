@@ -52,7 +52,7 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
 
 ## Requirements
 
-1. [yazi >= 25.5.28](https://github.com/sxyazi/yazi)
+1. [yazi >= 25.5.31](https://github.com/sxyazi/yazi)
 
 2. This plugin only supports Linux, and requires having [GLib](https://github.com/GNOME/glib), [gvfs](https://gitlab.gnome.org/GNOME/gvfs) (need D-Bus Session)
 

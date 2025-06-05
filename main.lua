@@ -1,4 +1,4 @@
---- @since 25.5.28
+--- @since 25.5.31
 
 local M = {}
 local SHELL = os.getenv("SHELL") or ""
@@ -935,7 +935,7 @@ local function mount_device(opts)
 						ui.Line(""),
 					})
 						:align(ui.Align.CENTER)
-						:wrap(ui.Text.WRAP),
+						:wrap(ui.Wrap.YES),
 					pos = { "center", w = 70, h = 10 },
 				})
 

@@ -434,7 +434,7 @@ local function save_password_keyring(password, protocol, user, domain, prefix, p
 			return false
 		end
 	end
-	if err or (res and res.stderr) then
+	if err or (res and not res.status.success and res.stderr) then
 		error(NOTIFY_MSG.SAVE_PASSWORD_FAILED, res and res.stderr or err)
 		return false
 	end
@@ -558,7 +558,7 @@ local function clear_password_keyring(protocol, user, domain, prefix, port)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	if res and res.stderr then
+	if res and res.stderr and not res.status.success then
 		if res.stderr:match("secret%-tool: Cannot get secret of a locked object") then
 			error(NOTIFY_MSG.SECRET_VAULT_LOCKED)
 			return false
@@ -948,7 +948,7 @@ local function mount_device(opts)
 	elseif res and res.status.code == 2 then
 		if res.stderr:match(".*volume doesn’t implement mount.*") then
 			error_msg = string.format(NOTIFY_MSG.HEADLESS_DETECTED)
-			retries = 3
+			retries = max_retry
 		end
 		if res.stdout:find("Authentication Required") then
 			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
@@ -1002,7 +1002,7 @@ local function mount_device(opts)
 	end
 	-- show notification after get max retry
 	if retries >= max_retry then
-		error(error_msg or res and res.stderr or err or "Error: Unknown")
+		error(error_msg or (res and not res.status.success and res.stderr) or err or "Error: Unknown")
 		return false
 	end
 

@@ -48,7 +48,7 @@ https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
 
 > [!NOTE]
 > There is a bug with yazi, which prevent mounted folders from refreshing after unmounted.
-> If you encounter this issue, try create new tab, or move cursor up and down a little bit to for yazi to refresh.
+> If you encounter this issue, try create new tab, or move cursor up and down a little bit for yazi to refresh.
 
 ## Requirements
 
@@ -109,7 +109,7 @@ require("gvfs"):setup({
   password_vault = "keyring",
 
   -- (Optional) Only need if you set password_vault = "pass"
-  -- Read the guide at SECURE_SAVED_PASSWORD.md for more information
+  -- Read the guide at SECURE_SAVED_PASSWORD.md to get your key_grip
   key_grip = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 
   -- (Optional) save password automatically after mounting. Default: false
@@ -137,7 +137,8 @@ prepend_keymap = [
 
     # Add|Edit|Remove mountpoint: smb, sftp, ftp, nfs, google-drive, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
     # Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
-    # For example: smb://user:password@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
+    # For example: smb://user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
+    # Scheme/Mount URIs shouldn't contain password.
     { on = [ "M", "a" ], run = "plugin gvfs -- add-mount", desc = "Add a GVFS mount URI" },
     # Edit or remove a GVFS mount URI will clear saved passwords for that mount URI.
     { on = [ "M", "e" ], run = "plugin gvfs -- edit-mount", desc = "Edit a GVFS mount URI" },

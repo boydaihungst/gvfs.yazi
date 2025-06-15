@@ -102,7 +102,7 @@ require("gvfs"):setup({
 
   -- (Optional) Save file.
   -- Default: ~/.config/yazi/gvfs.private
-  save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private"
+  save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
   -- (Optional) Select where to save passwords. Default: nil
   -- Available options: "keyring", "pass", or nil

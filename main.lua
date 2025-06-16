@@ -1236,7 +1236,7 @@ local function jump_to_device_mountpoint_action(device)
 
 	if mnt_point ~= "" then
 		set_state(STATE_KEY.PREV_CWD, current_dir())
-		ya.emit("cd", { mnt_point })
+		ya.emit("cd", { mnt_point, raw = true })
 	else
 		error(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 	end
@@ -1250,7 +1250,7 @@ local function jump_to_prev_cwd_action()
 	end
 	if is_dir(prev_cwd) then
 		set_state(STATE_KEY.PREV_CWD, current_dir())
-		ya.emit("cd", { prev_cwd })
+		ya.emit("cd", { prev_cwd, raw = true })
 	else
 		error(NOTIFY_MSG.CANT_ACCESS_PREV_CWD)
 	end
@@ -1314,6 +1314,7 @@ local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url, notify
 			ya.emit("cd", {
 				HOME,
 				tab = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,
+				raw = true,
 			})
 		end
 	end
@@ -1369,6 +1370,7 @@ local function remount_keep_cwd_unchanged_action()
 			ya.emit("cd", {
 				root_mountpoint,
 				tab = tab.id,
+				raw = true,
 			})
 		end
 	end
@@ -1377,6 +1379,7 @@ local function remount_keep_cwd_unchanged_action()
 		ya.emit("cd", {
 			tostring(tab.cwd),
 			tab = tab.id,
+			raw = true,
 		})
 	end
 end

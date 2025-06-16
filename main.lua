@@ -35,6 +35,7 @@ local NOTIFY_MSG = {
 	URI_CANT_BE_EMPTY = "URI can't be empty",
 	URI_IS_INVALID = "URI is invalid",
 	UNSUPPORTED_SCHEME = "Unsupported scheme %s",
+	UNSUPPORTED_MANUALLY_MOUNT_SCHEME = "%s scheme is mounted automatically via GNOME Online Accounts (GOA)",
 	DISPLAY_NAME_CANT_BE_EMPTY = "Display name can't be empty",
 	MOUNT_ERROR_PASSWORD = 'Failed to mount "%s", please check your password',
 	MOUNT_ERROR_USERNAME = 'Failed to mount "%s", please check your username',
@@ -69,6 +70,7 @@ local SCHEME = {
 	FTPS = "ftps",
 	FTPIS = "ftpis",
 	GOOGLE_DRIVE = "google-drive",
+	ONE_DRIVE = "onedrive",
 	DNS_SD = "dns-sd",
 	DAV = "dav",
 	DAVS = "davs",
@@ -90,6 +92,7 @@ local STATE_KEY = {
 	SAVE_PASSWORD_AUTOCONFIRM = "SAVE_PASSWORD_AUTOCONFIRM",
 	PASSWORD_VAULT = "PASSWORD_VAULT",
 	KEY_GRIP = "KEY_GRIP",
+	INPUT_POSITION = "INPUT_POSITION",
 }
 
 ---@enum ACTION
@@ -134,13 +137,20 @@ local ACTION = {
 ---@field is_shadowed "1"|"0"|nil
 ---@field password string?
 
+local set_state = ya.sync(function(state, key, value)
+	state[key] = value
+end)
+
+local get_state = ya.sync(function(state, key)
+	return state[key]
+end)
 ---@param is_password boolean?
 local function show_input(title, is_password, value)
 	local input_value, input_pw_event = ya.input({
 		title = title,
 		value = value or "",
 		obscure = is_password or false,
-		position = { "top-center", y = 3, w = 60 },
+		position = get_state(STATE_KEY.INPUT_POSITION),
 	})
 	if input_pw_event ~= 1 then
 		return nil, nil
@@ -155,14 +165,6 @@ end
 local function info(s, ...)
 	ya.notify({ title = PLUGIN_NAME, content = string.format(s, ...), timeout = 3, level = "info" })
 end
-
-local set_state = ya.sync(function(state, key, value)
-	state[key] = value
-end)
-
-local get_state = ya.sync(function(state, key)
-	return state[key]
-end)
 
 ---run any command
 ---@param cmd string
@@ -230,6 +232,16 @@ local function pathJoin(...)
 	path = path:gsub(separator .. "+", separator)
 
 	return path
+end
+
+local function tbl_remove_empty(tbl)
+	local cleaned = {}
+	for _, v in pairs(tbl) do
+		if v ~= nil and v ~= "" then
+			table.insert(cleaned, v)
+		end
+	end
+	return cleaned
 end
 
 local current_dir = ya.sync(function()
@@ -731,7 +743,7 @@ local function parse_devices(raw_input)
 			end
 
 			for _, value in pairs(SCHEME) do
-				if mount_uri:match("^" .. value .. ":") then
+				if mount_uri:match("^" .. is_literal_string(value) .. ":") then
 					current_mount.scheme = value
 				end
 			end
@@ -784,11 +796,15 @@ local function parse_devices(raw_input)
 		end
 
 		-- Attach scheme to volume
-		if v.uuid then
+		-- local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
+		if v.uuid and not v.uuid:match("([^:]+)://(.+)") then
 			v.scheme = SCHEME.FILE
 		else
 			for _, value in pairs(SCHEME) do
-				if v.uri and v.uri:match("^" .. value .. ":") then
+				if
+					(v.uri and v.uri:match("^" .. is_literal_string(value) .. ":"))
+					or (v.uuid and v.uuid:match("^" .. is_literal_string(value) .. "://"))
+				then
 					v.scheme = value
 				end
 			end
@@ -833,6 +849,7 @@ local function get_mount_path(target)
 		or target.scheme == SCHEME.FTPS
 		or target.scheme == SCHEME.FTPIS
 		or target.scheme == SCHEME.GOOGLE_DRIVE
+		or target.scheme == SCHEME.ONE_DRIVE
 		or target.scheme == SCHEME.NFS
 		or target.scheme == SCHEME.SFTP
 		or target.scheme == SCHEME.SMB
@@ -845,7 +862,7 @@ local function get_mount_path(target)
 			if
 				scheme
 				and f_scheme
-				and scheme:match("^" .. f_scheme)
+				and scheme:match("^" .. is_literal_string(f_scheme))
 				and f_domain == domain
 				and f_user == user
 				and f_ssl == ssl
@@ -1054,8 +1071,9 @@ end
 --- Unmount a mtp device
 ---@param device Device
 ---@param eject boolean? eject = true if user want to safty unplug the device
+---@param force boolean? Ignore outstanding file operations when unmounting or ejecting
 ---@return boolean
-local function unmount_gvfs(device, eject, max_retry, retries)
+local function unmount_gvfs(device, eject, force, max_retry, retries)
 	if not device then
 		return true
 	end
@@ -1067,16 +1085,17 @@ local function unmount_gvfs(device, eject, max_retry, retries)
 		unmount_method = "-e"
 	end
 	for _, mount in ipairs(device.mounts ~= nil and device.mounts or { device }) do
-		local cmd_err, res = run_command("gio", { "mount", unmount_method, mount.uri })
+		local cmd_err, res =
+			run_command("gio", tbl_remove_empty({ "mount", unmount_method, force and "-f" or nil, mount.uri }))
 		if cmd_err or (res and not res.status.success) then
-			if res and res.stderr:find("mount doesn.*t implement .*eject.* or .*eject_with_operation.*") then
-				return unmount_gvfs(device, false)
+			if eject and res and res.stderr:find("mount doesn.*t implement .*eject.* or .*eject_with_operation.*") then
+				return unmount_gvfs(device, false, force)
 			end
 			if retries >= max_retry then
 				error(NOTIFY_MSG.UNMOUNT_ERROR, tostring(res and (res.stderr or res.stdout)))
 				return false
 			end
-			return unmount_gvfs(device, eject, max_retry, retries + 1)
+			return unmount_gvfs(device, eject, force, max_retry, retries + 1)
 		end
 		if not cmd_err and res and res.status.success then
 			if eject then
@@ -1125,7 +1144,7 @@ end
 ---@return Device?
 local function get_device_from_path(path, devices)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
-	local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
+	local scheme, uri = string.match(path, "^" .. is_literal_string(root_mountpoint) .. "/([^:]+):host=(.+)")
 	local domain, user, ssl, prefix, port = nil, nil, nil, nil, nil
 	if not uri or not scheme then
 		return nil
@@ -1143,6 +1162,7 @@ local function get_device_from_path(path, devices)
 		or scheme == SCHEME.FTPS
 		or scheme == SCHEME.FTPIS
 		or scheme == SCHEME.GOOGLE_DRIVE
+		or scheme == SCHEME.ONE_DRIVE
 		or scheme == SCHEME.NFS
 		or scheme == SCHEME.SFTP
 		or scheme == SCHEME.SMB
@@ -1153,7 +1173,7 @@ local function get_device_from_path(path, devices)
 			local d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(device.uri)
 			if
 				d_scheme
-				and d_scheme:match("^" .. scheme)
+				and d_scheme:match("^" .. is_literal_string(scheme))
 				and d_domain == domain
 				and d_user == user
 				and d_ssl == ssl
@@ -1166,7 +1186,7 @@ local function get_device_from_path(path, devices)
 				d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(mount.uri)
 				if
 					d_scheme
-					and d_scheme:match("^" .. scheme)
+					and d_scheme:match("^" .. is_literal_string(scheme))
 					and d_domain == domain
 					and d_user == user
 					and d_ssl == ssl
@@ -1177,8 +1197,8 @@ local function get_device_from_path(path, devices)
 				end
 			end
 		end
-	elseif string.find(path, "^" .. GVFS_ROOT_MOUNTPOINT_FILE) then
-		local uuid = string.match(path, "^" .. GVFS_ROOT_MOUNTPOINT_FILE .. "/([^/]+)")
+	elseif string.find(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE)) then
+		local uuid = string.match(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/([^/]+)")
 		for _, device in ipairs(devices) do
 			if device.uuid == uuid then
 				return device
@@ -1187,11 +1207,11 @@ local function get_device_from_path(path, devices)
 	else
 		uri = is_literal_string(scheme .. "://" .. uri)
 		for _, device in ipairs(devices) do
-			if device.uri:match("^" .. uri .. ".*") then
+			if device.uri:match("^" .. is_literal_string(uri) .. ".*") then
 				return device
 			end
 			for _, mount in ipairs(device.mounts) do
-				if mount.uri:match("^" .. uri .. ".*") then
+				if mount.uri:match("^" .. is_literal_string(uri) .. ".*") then
 					return device
 				end
 			end
@@ -1302,7 +1322,8 @@ end)
 --- unmount action
 --- @param device Device?
 --- @param eject boolean? eject = true if user want to safty unplug the device
-local function unmount_action(device, eject)
+--- @param force boolean? Ignore outstanding file operations when unmounting or ejecting
+local function unmount_action(device, eject, force)
 	local selected_device
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
@@ -1324,7 +1345,7 @@ local function unmount_action(device, eject)
 	if selected_device.uuid then
 		redirect_unmounted_tab_to_home(mount_path, true)
 	end
-	local success = unmount_gvfs(selected_device, eject)
+	local success = unmount_gvfs(selected_device, eject, force)
 	if success and not selected_device.uuid then
 		redirect_unmounted_tab_to_home(mount_path, true)
 		-- cd to home for all tabs within the device, and then restore the tabs location
@@ -1454,6 +1475,10 @@ local function add_or_edit_mount_action(is_edit)
 		error(NOTIFY_MSG.UNSUPPORTED_SCHEME, tostring(_scheme))
 		return
 	end
+	if scheme == SCHEME.GOOGLE_DRIVE or scheme == SCHEME.ONE_DRIVE then
+		error(NOTIFY_MSG.UNSUPPORTED_MANUALLY_MOUNT_SCHEME, tostring(_scheme))
+		return
+	end
 
 	mount.name, _ = show_input("Enter display name:", false, mount.name or uri)
 
@@ -1469,7 +1494,7 @@ local function add_or_edit_mount_action(is_edit)
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	if selected_idx then
 		if is_mounted(mounts[selected_idx]) then
-			unmount_action(mounts[selected_idx])
+			unmount_action(mounts[selected_idx], false, true)
 		end
 		if mount.uri ~= mounts[selected_idx].uri then
 			local old_scheme, old_domain, old_user, _, old_prefix, old_port =
@@ -1502,7 +1527,7 @@ local function remove_mount_action()
 	end
 
 	if is_mounted(mount) then
-		unmount_action(mount)
+		unmount_action(mount, false, true)
 	end
 	-- run_command("gio", { "mount", "-u", mount.uri })
 	local old_scheme, old_domain, old_user, _, old_prefix, old_port =
@@ -1522,6 +1547,10 @@ function M:setup(opts)
 	if opts and opts.key_grip then
 		set_state(STATE_KEY.KEY_GRIP, opts.key_grip)
 	end
+	set_state(
+		STATE_KEY.INPUT_POSITION,
+		opts and type(opts.input_position) == "table" and opts.input_position or { "top-center", y = 3, w = 60 }
+	)
 	if opts and opts.save_password_autoconfirm == true then
 		set_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM, true)
 	end
@@ -1564,7 +1593,7 @@ function M:setup(opts)
 	end)
 end
 
----@param job {args: string[], args: {jump: boolean?, eject: boolean?}}
+---@param job {args: string[], args: {jump: boolean?, eject: boolean?, force: boolean?}}
 function M:entry(job)
 	if not is_cmd_exist("gio") then
 		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
@@ -1594,7 +1623,8 @@ function M:entry(job)
 		-- select a device then unmount
 	elseif action == ACTION.SELECT_THEN_UNMOUNT then
 		local eject = job.args.eject or false
-		unmount_action(nil, eject)
+		local force = job.args.force or false
+		unmount_action(nil, eject, force)
 		-- remount device within current cwd
 	elseif action == ACTION.REMOUNT_KEEP_CWD_UNCHANGED then
 		remount_keep_cwd_unchanged_action()

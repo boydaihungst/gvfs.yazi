@@ -13,12 +13,12 @@
 [gvfs.yazi](https://github.com/boydaihungst/gvfs.yazi) uses [gvfs](https://wiki.gnome.org/Projects/gvfs) and [gio from glib](https://github.com/GNOME/glib) to transparently mount and unmount devices in read/write mode,
 allowing you to navigate inside, view, and edit individual or groups of files.
 
-Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive, DNS-SD, DAV (WebDAV), AFP, AFC.
+Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), One drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), DNS-SD, DAV (WebDAV), AFP, AFC.
 You need to install corresponding packages to use them.
 
-Tested: MTP, Hard disk/drive, GPhoto2 (PTP), DAV, SFTP, FTP. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
+Tested: MTP, Hard disk/drive, GPhoto2 (PTP), DAV, SFTP, FTP, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
-By default, `mount` will shows list of devices which have MTP, GPhoto2, AFC, Hard disk/drive protocols or list of added scheme/mount URI.
+By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive) or list of added scheme/mount URI.
 For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
 
 > [!NOTE]
@@ -28,6 +28,9 @@ For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes 
 > - If you have any problems with one of the protocols, please manually mount the device with `gio mount SCHEMES`. [List of supported schemes](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>). Then create an issue ticket with the output of `gio mount -li` and list of the mount paths under `/run/user/1000/gvfs/XYZ` and `/run/media/USERNAME`
 > - Put files in Trash bin won't work on some protocols (Android MTP), use permanently delete instead.
 > - Scheme/Mount URIs shouldn't contain password, because they are saved as plain text in `yazi/config/gvfs.private`.
+> - MTP, GPhoto2, AFC, Hard disk/drive are listed automatically. So you also don't need to add them via `add-mount`
+> - Google Drive, One drive are mounted automatically via GNOME Online Accounts (GOA). So you don't need to add them via `add-mount`.
+>   Guide to setup [GNOME_ONLINE_ACCOUNTS_GOA.md](./GNOME_ONLINE_ACCOUNTS_GOA.md)
 
 ## Preview
 
@@ -104,6 +107,17 @@ require("gvfs"):setup({
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
+  -- (Optional) input position. Default: { "center", y = 0, w = 60 },
+	-- Position, which is a table:
+	-- 	`1`: Origin position, available values: "top-left", "top-center", "top-right",
+	-- 	     "bottom-left", "bottom-center", "bottom-right", "center", and "hovered".
+  --       "hovered" is the position of hovered file/folder
+	-- 	`x`: X offset from the origin position.
+	-- 	`y`: Y offset from the origin position.
+	-- 	`w`: Width of the input.
+	-- 	`h`: Height of the input.
+	input_position = { "center", y = 0, w = 60 },
+
   -- (Optional) Select where to save passwords. Default: nil
   -- Available options: "keyring", "pass", or nil
   password_vault = "keyring",
@@ -134,11 +148,16 @@ prepend_keymap = [
     # or this if you want to unmount and eject device. Ejected device can safely be removed.
     # Fallback to normal unmount if not supported by device.
     { on = [ "M", "u" ], run = "plugin gvfs -- select-then-unmount --eject", desc = "Select device then eject" },
+    # Also support force unmount/eject.
+    # force = true -> Ignore outstanding file operations when unmounting or ejecting
+    { on = [ "M", "U" ], run = "plugin gvfs -- select-then-unmount --eject --force", desc = "Select device then force to eject/unmount" },
 
-    # Add|Edit|Remove mountpoint: smb, sftp, ftp, nfs, google-drive, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
+    # Add|Edit|Remove mountpoint: smb, sftp, ftp, nfs, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
     # Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
     # For example: smb://user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
-    # Scheme/Mount URIs shouldn't contain password.
+    # - Scheme/Mount URIs shouldn't contain password.
+    # - Google Drive, One drive are mounted automatically via GNOME Online Accounts (GOA). Avoid adding them. Use GOA instead: ./GNOME_ONLINE_ACCOUNTS_GOA.md
+    # - MTP, GPhoto2, AFC, Hard disk/drive are listed automatically. Avoid adding them
     { on = [ "M", "a" ], run = "plugin gvfs -- add-mount", desc = "Add a GVFS mount URI" },
     # Edit or remove a GVFS mount URI will clear saved passwords for that mount URI.
     { on = [ "M", "e" ], run = "plugin gvfs -- edit-mount", desc = "Edit a GVFS mount URI" },

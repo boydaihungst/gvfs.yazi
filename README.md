@@ -34,7 +34,7 @@ For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes 
 
 ## Preview
 
-https://github.com/user-attachments/assets/9e9df85c-d8d6-4b97-b978-614965d3b218
+https://github.com/user-attachments/assets/6aad98f7-081a-4e06-b398-5f7e8ca4ab39
 
 ## Features
 

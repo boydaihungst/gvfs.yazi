@@ -107,7 +107,7 @@ require("gvfs"):setup({
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
-  -- (Optional) input position. Default: { "center", y = 0, w = 60 },
+  -- (Optional) input position. Default: { "top-center", y = 3, w = 60 },
 	-- Position, which is a table:
 	-- 	`1`: Origin position, available values: "top-left", "top-center", "top-right",
 	-- 	     "bottom-left", "bottom-center", "bottom-right", "center", and "hovered".

@@ -108,15 +108,15 @@ require("gvfs"):setup({
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
   -- (Optional) input position. Default: { "top-center", y = 3, w = 60 },
-	-- Position, which is a table:
-	-- 	`1`: Origin position, available values: "top-left", "top-center", "top-right",
-	-- 	     "bottom-left", "bottom-center", "bottom-right", "center", and "hovered".
-  --       "hovered" is the position of hovered file/folder
-	-- 	`x`: X offset from the origin position.
-	-- 	`y`: Y offset from the origin position.
-	-- 	`w`: Width of the input.
-	-- 	`h`: Height of the input.
-	input_position = { "center", y = 0, w = 60 },
+  -- Position, which is a table:
+  -- 	`1`: Origin position, available values: "top-left", "top-center", "top-right",
+  -- 	     "bottom-left", "bottom-center", "bottom-right", "center", and "hovered".
+  --         "hovered" is the position of hovered file/folder
+  -- 	`x`: X offset from the origin position.
+  -- 	`y`: Y offset from the origin position.
+  -- 	`w`: Width of the input.
+  -- 	`h`: Height of the input.
+  input_position = { "center", y = 0, w = 60 },
 
   -- (Optional) Select where to save passwords. Default: nil
   -- Available options: "keyring", "pass", or nil

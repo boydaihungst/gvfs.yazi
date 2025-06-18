@@ -121,7 +121,6 @@ local ACTION = {
 ---@field can_unmount "1"|"0"
 ---@field can_eject "1"|"0"
 ---@field should_automount "1"|"0"
----@field password string?
 
 ---@class (exact) Mount
 ---@field name string
@@ -135,7 +134,54 @@ local ACTION = {
 ---@field can_unmount "1"|"0"|nil
 ---@field can_eject "1"|"0"|nil
 ---@field is_shadowed "1"|"0"|nil
----@field password string?
+
+-- Encode binary string to hex (e.g., "\xED" => "\\xED")
+local function hex_encode(s)
+	return (s:gsub(".", function(c)
+		return string.format("\\x%02X", c:byte())
+	end))
+end
+
+-- Decode hex-encoded string (e.g., "\\xED" => "\xED")
+local function hex_decode(s)
+	return (s:gsub("\\x(%x%x)", function(hex)
+		return string.char(tonumber(hex, 16))
+	end))
+end
+
+local function hex_encode_table(t)
+	local out = {}
+	for k, v in pairs(t) do
+		local new_k = type(k) == "string" and hex_encode(k) or k
+		local new_v
+		if type(v) == "table" then
+			new_v = hex_encode_table(v)
+		elseif type(v) == "string" then
+			new_v = hex_encode(v)
+		else
+			new_v = v
+		end
+		out[new_k] = new_v
+	end
+	return out
+end
+
+local function hex_decode_table(t)
+	local out = {}
+	for k, v in pairs(t) do
+		local new_k = type(k) == "string" and hex_decode(k) or k
+		local new_v
+		if type(v) == "table" then
+			new_v = hex_decode_table(v)
+		elseif type(v) == "string" then
+			new_v = hex_decode(v)
+		else
+			new_v = v
+		end
+		out[new_k] = new_v
+	end
+	return out
+end
 
 local set_state = ya.sync(function(state, key, value)
 	state[key] = value
@@ -1307,7 +1353,7 @@ local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url, notify
 	end
 	-- broadcast to other instances
 	if notify then
-		broadcast(PUBSUB_KIND.unmounted, unmounted_url)
+		broadcast(PUBSUB_KIND.unmounted, hex_encode(unmounted_url))
 	end
 	for _, tab in ipairs(cx.tabs) do
 		if tab.current.cwd:starts_with(unmounted_url) then
@@ -1410,14 +1456,14 @@ local save_mounts = function()
 
 	-- save mounts to file
 	if save_path_created then
-		local _, err_write = fs.write(save_path, ya.json_encode(mounts))
+		local _, err_write = fs.write(save_path, ya.json_encode(hex_encode_table(mounts)))
 		if err_write then
 			error(NOTIFY_MSG.CANT_SAVE_DEVICES, tostring(save_path))
 		end
 	end
 
 	-- trigger update to other instances
-	broadcast(PUBSUB_KIND.mounts_changed, mounts)
+	broadcast(PUBSUB_KIND.mounts_changed, hex_encode_table(mounts))
 end
 
 local read_mounts_from_saved_file = function(save_path)
@@ -1427,7 +1473,7 @@ local read_mounts_from_saved_file = function(save_path)
 	end
 	local encoded_data = file:read("*all")
 	file:close()
-	return ya.json_decode(encoded_data)
+	return hex_decode_table(ya.json_decode(encoded_data))
 end
 
 ---@param is_edit boolean?
@@ -1589,10 +1635,10 @@ function M:setup(opts)
 	set_state(STATE_KEY.MOUNTS, read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH)))
 
 	ps.sub_remote(PUBSUB_KIND.mounts_changed, function(mounts)
-		set_state(STATE_KEY.MOUNTS, mounts)
+		set_state(STATE_KEY.MOUNTS, hex_decode_table(mounts))
 	end)
 	ps.sub_remote(PUBSUB_KIND.unmounted, function(unmounted_url)
-		redirect_unmounted_tab_to_home(unmounted_url)
+		redirect_unmounted_tab_to_home(hex_decode(unmounted_url))
 	end)
 end
 

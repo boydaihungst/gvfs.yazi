@@ -196,6 +196,8 @@ local function show_input(title, is_password, value)
 		title = title,
 		value = value or "",
 		obscure = is_password or false,
+		pos = get_state(STATE_KEY.INPUT_POSITION),
+		-- TODO: remove this after next yazi released
 		position = get_state(STATE_KEY.INPUT_POSITION),
 	})
 	if input_pw_event ~= 1 then
@@ -992,6 +994,14 @@ local function mount_device(opts)
 			local confirmed_save_password = get_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM)
 				or ya.confirm({
 					title = ui.Line("Remember password?"):style(th.confirm.title),
+					body = ui.Text({
+						ui.Line(""),
+						ui.Line("Press Yes to save password to secret vault."):style(th.confirm.content),
+						ui.Line(""),
+					})
+						:align(ui.Align.CENTER)
+						:wrap(ui.Wrap.YES),
+					-- TODO: remove this after next yazi released
 					content = ui.Text({
 						ui.Line(""),
 						ui.Line("Press Yes to save password to secret vault."):style(th.confirm.content),

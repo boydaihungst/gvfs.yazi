@@ -409,7 +409,8 @@ local function is_secret_vault_available_gpg(unlock_vault_dialog, is_second_run)
 			return true
 		elseif unlock_vault_dialog and res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ - ") then
 			-- Display gpg unlock TUI window
-			local permit = ya.hide()
+			-- TODO: remove this after next yazi released
+			local permit = (ui.hide or ya.hide)()
 			-- Wrap in shell to capture exit code
 			local full_cmd = string.format("bash -c '%s; echo __EXIT__$?__'", "pass " .. test_vault_entry .. " 2>&1")
 			local handle = io.popen(full_cmd)
@@ -1768,7 +1769,8 @@ function M:entry(job)
 	elseif action == ACTION.REMOVE_MOUNT then
 		remove_mount_action()
 	end
-	ya.render()
+	-- TODO: remove this after next yazi released
+	(ui.render or ya.render)()
 end
 
 return M

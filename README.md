@@ -16,7 +16,7 @@ allowing you to navigate inside, view, and edit individual or groups of files.
 Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), One drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), DNS-SD, DAV (WebDAV), AFP, AFC.
 You need to install corresponding packages to use them.
 
-Tested: MTP, Hard disk/drive, GPhoto2 (PTP), DAV, SFTP, FTP, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
+Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive) or list of added scheme/mount URI.
 For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).

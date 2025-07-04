@@ -114,6 +114,7 @@ local ACTION = {
 ---@field bus integer?
 ---@field device integer?
 ---@field uuid string?
+---@field encrypted_uuid string?
 ---@field owner string?
 ---@field activation_root string?
 ---@field uri string
@@ -129,7 +130,6 @@ local ACTION = {
 ---@field bus integer?
 ---@field device integer?
 ---@field uuid string?
----@field label string?
 ---@field owner string?
 ---@field default_location string?
 ---@field can_unmount "1"|"0"|nil
@@ -281,6 +281,11 @@ local function pathJoin(...)
 	path = path:gsub(separator .. "+", separator)
 
 	return path
+end
+
+local function is_folder_exist(path)
+	local err, output = run_command("[", { "-d", path, "]" })
+	return output and output.status and output.status.success
 end
 
 local function tbl_remove_empty(tbl)
@@ -823,7 +828,6 @@ local function parse_devices(raw_input)
 				if owner and label_or_uuid then
 					current_mount.owner = owner
 					current_mount.uuid = current_volume and current_volume.uuid or label_or_uuid
-					current_mount.label = current_volume and label_or_uuid
 				end
 			end
 			table.insert(mounts, current_mount)
@@ -831,6 +835,12 @@ local function parse_devices(raw_input)
 		-- Match key=value metadata
 		else
 			local key, value = clean_line:match("^(%S+)%s*=%s*(.+)$")
+			if not key or not value then
+				key, value = clean_line:match("^(%S+)%s*:%s*'(.-)'$")
+				if key == "uuid" and value then
+					current_volume.encrypted_uuid = value
+				end
+			end
 			if key and value then
 				-- Attach to mount or volume
 				local target = current_mount or current_volume
@@ -937,7 +947,16 @@ local function get_mount_path(target)
 		end
 		return ""
 	elseif target.scheme == SCHEME.FILE and target.uuid then
-		return pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.label or target.uuid)
+		local mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.name)
+		if is_folder_exist(mountpath) then
+			return mountpath
+		else
+			mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.uuid)
+			if is_folder_exist(mountpath) then
+				return mountpath
+			end
+		end
+		return ""
 	elseif target.uri then
 		local uri = target.uri:gsub("//", "host=", 1)
 		return pathJoin(root_mountpoint, uri)
@@ -1028,8 +1047,13 @@ local function mount_device(opts)
 				})
 
 			if confirmed_save_password then
-				local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-				save_password(password, scheme, username or user, domain, prefix, port)
+				if device.uuid then
+					-- case hard drive
+					save_password(password, device.scheme, device.uuid, device.uuid)
+				else
+					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+					save_password(password, scheme, username or user, domain, prefix, port)
+				end
 			end
 		end
 		return true
@@ -1061,8 +1085,13 @@ local function mount_device(opts)
 						skipped_secret_vault = true
 					end
 					if not skipped_secret_vault then
-						local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-						password = lookup_password(scheme, username or user, domain, prefix, port)
+						if device.uuid then
+							-- case hard drive
+							password = lookup_password(device.scheme, device.uuid, device.uuid)
+						else
+							local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
+							password = lookup_password(scheme, username or user, domain, prefix, port)
+						end
 						is_pw_saved = password ~= nil
 						if is_pw_saved then
 							info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
@@ -1123,11 +1152,15 @@ end
 
 ---Return list of mounted devices
 ---@param status DEVICE_CONNECT_STATUS
+---@param filter? function
 ---@return Device[]
-local function list_gvfs_device_by_status(status)
+local function list_gvfs_device_by_status(status, filter)
 	local devices = list_gvfs_device()
 	local devices_filtered = {}
 	for _, d in ipairs(devices) do
+		if filter and not filter(d) then
+			goto continue
+		end
 		local mounted = is_mounted(d)
 		if status == DEVICE_CONNECT_STATUS.MOUNTED and mounted then
 			table.insert(devices_filtered, d)
@@ -1135,6 +1168,7 @@ local function list_gvfs_device_by_status(status)
 		if status == DEVICE_CONNECT_STATUS.NOT_MOUNTED and not mounted then
 			table.insert(devices_filtered, d)
 		end
+		::continue::
 	end
 	return devices_filtered
 end
@@ -1275,7 +1309,7 @@ local function get_device_from_path(path, devices)
 				return device
 			end
 			for _, mount in ipairs(device.mounts) do
-				if mount.label == label_or_uuid then
+				if mount.name == label_or_uuid then
 					return device
 				end
 			end
@@ -1298,7 +1332,7 @@ end
 
 --- Jump to device mountpoint
 ---@param device Device?
-local function jump_to_device_mountpoint_action(device)
+local function jump_to_device_mountpoint_action(device, retry)
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 		device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
@@ -1309,6 +1343,16 @@ local function jump_to_device_mountpoint_action(device)
 	end
 	local mnt_point = get_mount_path(device)
 	-- local success = is_mounted(device)
+	if mnt_point == "" and device.uuid and not retry then
+		-- case hard drive encrypted -> mount uuid changed
+		local matched_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
+			return d.encrypted_uuid == device.uuid or d.uuid == device.uuid
+		end)
+		if #matched_devices >= 1 then
+			device = matched_devices[1]
+			return jump_to_device_mountpoint_action(device, true)
+		end
+	end
 
 	if mnt_point ~= "" then
 		set_state(STATE_KEY.PREV_CWD, current_dir())

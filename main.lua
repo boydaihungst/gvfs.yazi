@@ -109,12 +109,14 @@ local ACTION = {
 
 ---@class (exact) Device
 ---@field name string
+---@field class string?
 ---@field mounts Mount[]
 ---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
 ---@field uuid string?
 ---@field encrypted_uuid string?
+---@field ["unix-device"] string?
 ---@field owner string?
 ---@field activation_root string?
 ---@field uri string
@@ -125,11 +127,13 @@ local ACTION = {
 
 ---@class (exact) Mount
 ---@field name string
+---@field class string?
 ---@field uri string
 ---@field scheme SCHEME
 ---@field bus integer?
 ---@field device integer?
 ---@field uuid string?
+---@field ["unix-device"] string?
 ---@field owner string?
 ---@field default_location string?
 ---@field can_unmount "1"|"0"|nil
@@ -746,19 +750,12 @@ end
 local function is_mountpoint_belong_to_volume(mount, volume)
 	return mount.is_shadowed ~= "1"
 		and mount.scheme
-		and volume.scheme
 		and mount.scheme == volume.scheme
 		and (
-			(mount.uri and volume.uri and mount.uri == volume.uri)
-			or (mount.uuid and volume.uuid and mount.uuid == volume.uuid)
-			or (
-				mount.bus
-				and volume.bus
-				and mount.device
-				and volume.device
-				and mount.bus == volume.bus
-				and mount.device == volume.device
-			)
+			(mount.uri and mount.uri == volume.uri)
+			or (mount.uuid and mount.uuid == volume.uuid)
+			or (mount["unix-device"] and mount["unix-device"] == volume["unix-device"])
+			or (mount.bus and mount.device and mount.bus == volume.bus and mount.device == volume.device)
 		)
 end
 
@@ -776,7 +773,10 @@ local function parse_devices(raw_input)
 
 		-- Match volume(0)
 		local volume_name = clean_line:match("^Volume%(%d+%):%s*(.+)$")
-		if volume_name then
+		if line:match("^Drive%(%d+%):") then
+			current_mount = nil
+			current_volume = nil
+		elseif volume_name then
 			current_mount = nil
 			current_volume = { name = volume_name, mounts = {} }
 			table.insert(volumes, current_volume)
@@ -827,7 +827,9 @@ local function parse_devices(raw_input)
 				local owner, label_or_uuid = mount_uri:match("^file:///run/media/(.+)/(.+)")
 				if owner and label_or_uuid then
 					current_mount.owner = owner
-					current_mount.uuid = current_volume and current_volume.uuid or label_or_uuid
+					current_mount.uuid = current_volume and (current_volume.uuid or current_volume["unix-device"])
+						or label_or_uuid
+					current_mount["unix-device"] = current_volume and current_volume["unix-device"]
 				end
 			end
 			table.insert(mounts, current_mount)
@@ -868,9 +870,12 @@ local function parse_devices(raw_input)
 			v.uri = v.activation_root
 		end
 
+		if not v.uuid and v.class == "device" and v["unix-device"] then
+			v.uuid = v["unix-device"]
+			v.scheme = SCHEME.FILE
 		-- Attach scheme to volume
 		-- local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
-		if v.uuid and not v.uuid:match("([^:]+)://(.+)") then
+		elseif v.uuid and not v.uuid:match("([^:]+)://(.+)") then
 			v.scheme = SCHEME.FILE
 		else
 			for _, value in pairs(SCHEME) do
@@ -905,7 +910,7 @@ local function parse_devices(raw_input)
 	return volumes
 end
 
----@param target Device|Mount
+---@param target Device
 ---@return string
 local function get_mount_path(target)
 	if not target then

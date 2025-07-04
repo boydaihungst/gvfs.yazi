@@ -129,6 +129,7 @@ local ACTION = {
 ---@field bus integer?
 ---@field device integer?
 ---@field uuid string?
+---@field label string?
 ---@field owner string?
 ---@field default_location string?
 ---@field can_unmount "1"|"0"|nil
@@ -751,7 +752,9 @@ local function parse_devices(raw_input)
 	local volumes = {}
 	local mounts = {}
 	local predefined_mounts = tbl_deep_clone(get_state(STATE_KEY.MOUNTS)) or {}
+	---@type Device?
 	local current_volume = nil
+	---@type Mount?
 	local current_mount = nil
 
 	for line in raw_input:gmatch("[^\r\n]+") do
@@ -766,13 +769,15 @@ local function parse_devices(raw_input)
 
 		-- Match mount(0)
 		elseif clean_line:match("^Mount%(%d+%):") then
-			current_volume = nil
 			current_mount = nil
-			local mount_name, mount_uri = clean_line:match("^Mount%(%d+%):%s*(.-)%s*->%s*(.+)$")
+			local mount_indent, mount_name, mount_uri = line:match("^(%s*)Mount%(%d+%):%s*(.-)%s*->%s*(.+)$")
 			if not mount_name then
 				mount_name = clean_line:match("^Mount%(%d+%):%s*(.+)$")
 			end
 
+			if not mount_indent or #mount_indent == 0 then
+				current_volume = nil
+			end
 			current_mount = { name = mount_name or "", uri = mount_uri or "" }
 
 			local m_scheme, m_domain, m_user, m_ssl, m_prefix, m_port = extract_domain_user_from_uri(mount_uri)
@@ -805,10 +810,11 @@ local function parse_devices(raw_input)
 					current_mount.device = device
 				end
 				-- file:///run/media/huyhoang/6412-E4B2
-				local owner, uuid = mount_uri:match("^file:///run/media/(.+)/(.+)")
-				if owner and uuid then
+				local owner, label_or_uuid = mount_uri:match("^file:///run/media/(.+)/(.+)")
+				if owner and label_or_uuid then
 					current_mount.owner = owner
-					current_mount.uuid = uuid
+					current_mount.uuid = current_volume and current_volume.uuid or label_or_uuid
+					current_mount.label = current_volume and label_or_uuid
 				end
 			end
 			table.insert(mounts, current_mount)
@@ -922,7 +928,7 @@ local function get_mount_path(target)
 		end
 		return ""
 	elseif target.scheme == SCHEME.FILE and target.uuid then
-		return pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.uuid)
+		return pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.label or target.uuid)
 	elseif target.uri then
 		local uri = target.uri:gsub("//", "host=", 1)
 		return pathJoin(root_mountpoint, uri)
@@ -1254,10 +1260,15 @@ local function get_device_from_path(path, devices)
 			end
 		end
 	elseif string.find(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE)) then
-		local uuid = string.match(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/([^/]+)")
+		local label_or_uuid = string.match(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/([^/]+)")
 		for _, device in ipairs(devices) do
-			if device.uuid == uuid then
+			if device.uuid == label_or_uuid then
 				return device
+			end
+			for _, mount in ipairs(device.mounts) do
+				if mount.label == label_or_uuid then
+					return device
+				end
 			end
 		end
 	else

@@ -740,11 +740,20 @@ end
 
 local function is_mountpoint_belong_to_volume(mount, volume)
 	return mount.is_shadowed ~= "1"
+		and mount.scheme
+		and volume.scheme
 		and mount.scheme == volume.scheme
 		and (
-			mount.uri == volume.uri
-			or mount.uuid == volume.uuid
-			or (mount.bus == volume.bus and mount.device == volume.device)
+			(mount.uri and volume.uri and mount.uri == volume.uri)
+			or (mount.uuid and volume.uuid and mount.uuid == volume.uuid)
+			or (
+				mount.bus
+				and volume.bus
+				and mount.device
+				and volume.device
+				and mount.bus == volume.bus
+				and mount.device == volume.device
+			)
 		)
 end
 

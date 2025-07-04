@@ -146,6 +146,7 @@ prepend_keymap = [
     { on = [ "M", "R" ], run = "plugin gvfs -- remount-current-cwd-device", desc = "Remount device under cwd" },
     { on = [ "M", "u" ], run = "plugin gvfs -- select-then-unmount", desc = "Select device then unmount" },
     # or this if you want to unmount and eject device. Ejected device can safely be removed.
+    # Ejecting a device will unmount all paritions/volumes under it.
     # Fallback to normal unmount if not supported by device.
     { on = [ "M", "u" ], run = "plugin gvfs -- select-then-unmount --eject", desc = "Select device then eject" },
     # Also support force unmount/eject.

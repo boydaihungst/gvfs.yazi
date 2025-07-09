@@ -708,7 +708,7 @@ local function extract_domain_user_from_uri(s)
 	end
 
 	local ssl = (s:match("^davs") or s:match("^ftps") or s:match("^ftpis") or s:match("^https")) and true or false
-	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$") or nil
+	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$"):gsub("/$", "") or nil
 	return scheme, domain, user, ssl, prefix, port
 end
 

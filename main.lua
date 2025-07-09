@@ -983,6 +983,16 @@ local function is_mounted(device)
 	return mountpath and mountpath ~= "" and fs.cha(Url(mountpath))
 end
 
+---@param device Device
+---@return string
+local function get_mount_format(device)
+	if device.scheme == SCHEME.SMB then
+		return "%s\n\n%s"
+	end
+
+	return "%s\n%s"
+end
+
 ---mount mtp device
 ---@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
@@ -1004,14 +1014,9 @@ local function mount_device(opts)
 	local auths = ""
 	local auth_string_format = ""
 	if password or username then
-		if username then
-			auths = path_quote(username)
-			auth_string_format = auth_string_format .. "%s\n"
-		end
-		if password then
-			auths = auths .. " " .. path_quote(password)
-			auth_string_format = auth_string_format .. "%s\n"
-		end
+		auth_string_format = get_mount_format(device)
+
+		auths = (path_quote(username) or "''") .. " " .. (path_quote(password) or "''")
 	end
 
 	local res, err = Command(SHELL)

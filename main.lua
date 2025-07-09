@@ -1234,7 +1234,10 @@ local function select_device_which_key(devices)
 		end
 		table.insert(
 			cands,
-			{ on = tostring(allow_key_array[idx]), desc = (d.name or "NO_NAME") .. " (" .. d.scheme .. ")" }
+			{
+				on = tostring(allow_key_array[idx]),
+				desc = (d.name or "NO_NAME") .. " (" .. (d.scheme or "NO_SCHEME_DETECTED") .. ")",
+			}
 		)
 	end
 

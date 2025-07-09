@@ -931,7 +931,6 @@ local function get_mount_path(target)
 		or target.scheme == SCHEME.ONE_DRIVE
 		or target.scheme == SCHEME.NFS
 		or target.scheme == SCHEME.SFTP
-		or target.scheme == SCHEME.SMB
 		or target.scheme == SCHEME.DNS_SD
 	then
 		local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(target.uri)
@@ -952,6 +951,17 @@ local function get_mount_path(target)
 			end
 		end
 		return ""
+	elseif target.scheme == SCHEME.SMB then
+		local res, err = Command(SHELL)
+			:arg({
+				"-c",
+				"gio info " .. target.uri .. ' | grep "local path"',
+			})
+			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+			:stderr(Command.PIPED)
+			:stdout(Command.PIPED)
+			:output()
+		return string.sub(string.gsub(res.stdout, "^%s*(.-)%s*$", "%1"), 13)
 	elseif target.scheme == SCHEME.FILE and target.uuid then
 		local mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.name)
 		if is_folder_exist(mountpath) then

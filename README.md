@@ -205,3 +205,9 @@ previewers = [
 ## Note for mounting using fstab
 
 If you are using fstab to mount your devices, you need to add `x-gvfs-show` to the mount options. And with this this plugin can only use `jump-to-device` and `jump-back-prev-cwd` actions.
+
+For example:
+
+```
+//192.168.1.10/hdd  /mnt/myshare  cifs  credentials=/etc/samba/credentials,x-gvfs-show,iocharset=utf8,uid=1000,gid=1000,file_mode=0660,dir_mode=0770,nofail  0  0
+```

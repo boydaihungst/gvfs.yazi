@@ -1353,9 +1353,12 @@ local function mount_action(opts)
 		end)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
+
 		if #list_devices == 0 then
 			-- If every devices are mounted, then select the first one
-			local list_devices_mounted = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
+			local list_devices_mounted = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
+				return d.can_mount ~= "0"
+			end)
 			selected_device = #list_devices_mounted >= 1 and list_devices_mounted[1] or nil
 			if not selected_device then
 				info(NOTIFY_MSG.LIST_DEVICES_EMPTY)

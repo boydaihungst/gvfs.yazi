@@ -116,6 +116,7 @@ local ACTION = {
 ---@field device integer?
 ---@field uuid string?
 ---@field encrypted_uuid string?
+---@field service_domain string?
 ---@field ["unix-device"] string?
 ---@field owner string?
 ---@field activation_root string?
@@ -338,7 +339,7 @@ local function string_to_array(s)
 end
 
 local function is_literal_string(str)
-	return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+	return str and str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
 end
 
 local function tbl_deep_clone(original)
@@ -381,13 +382,14 @@ local function is_secret_vault_available_keyring(unlock_vault_dialog)
 	return true
 end
 
-local function build_secret_vault_entry_gpg(protocol, user, domain, prefix, port)
+local function build_secret_vault_entry_gpg(protocol, user, domain, prefix, port, service_domain)
 	protocol = protocol and ("/" .. protocol) or ""
 	user = user and ("/" .. user) or ""
 	domain = domain and ("/" .. domain) or ""
 	prefix = prefix and ("/" .. prefix) or ""
 	port = port and ("/" .. port) or ""
-	return PLUGIN_NAME .. "/" .. SECRET_VAULT_VERSION .. protocol .. user .. domain .. port .. prefix
+	service_domain = service_domain and ("/" .. service_domain) or ""
+	return PLUGIN_NAME .. "/" .. SECRET_VAULT_VERSION .. protocol .. user .. domain .. port .. prefix .. service_domain
 end
 
 local function is_secret_vault_available_gpg(unlock_vault_dialog, is_second_run)
@@ -455,7 +457,7 @@ local function is_secret_vault_available(unlock_vault_dialog)
 	return nil
 end
 
-local function save_password_keyring(password, protocol, user, domain, prefix, port)
+local function save_password_keyring(password, protocol, user, domain, prefix, port, service_domain)
 	if not user or not password or not protocol or not domain then
 		return false
 	end
@@ -475,6 +477,7 @@ local function save_password_keyring(password, protocol, user, domain, prefix, p
 						.. domain
 						.. (port and (":" .. port) or "")
 						.. (prefix and ("/" .. prefix) or "")
+						.. (service_domain and ("/" .. service_domain) or "")
 				)
 				.. " "
 				.. PLUGIN_NAME
@@ -487,7 +490,8 @@ local function save_password_keyring(password, protocol, user, domain, prefix, p
 				.. " domain "
 				.. path_quote(domain)
 				.. (port and (" port " .. port) or "")
-				.. (prefix and (" prefix " .. path_quote(prefix)) or ""),
+				.. (prefix and (" prefix " .. path_quote(prefix)) or "")
+				.. (service_domain and (" service_domain " .. path_quote(service_domain)) or ""),
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
@@ -513,7 +517,7 @@ local function save_password_keyring(password, protocol, user, domain, prefix, p
 	return true
 end
 
-local function save_password_gpg(password, protocol, user, domain, prefix, port)
+local function save_password_gpg(password, protocol, user, domain, prefix, port, service_domain)
 	if not user or not password or not protocol or not domain then
 		return false
 	end
@@ -525,7 +529,7 @@ local function save_password_gpg(password, protocol, user, domain, prefix, port)
 				.. PASS_TOOL
 				.. " insert "
 				.. " -f "
-				.. path_quote(build_secret_vault_entry_gpg(protocol, user, domain, prefix, port)),
+				.. path_quote(build_secret_vault_entry_gpg(protocol, user, domain, prefix, port, service_domain)),
 		})
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
@@ -540,21 +544,21 @@ local function save_password_gpg(password, protocol, user, domain, prefix, port)
 	return true
 end
 
-local function save_password(password, protocol, user, domain, prefix, port)
+local function save_password(password, protocol, user, domain, prefix, port, service_domain)
 	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
-		return save_password_keyring(password, protocol, user, domain, prefix, port)
+		return save_password_keyring(password, protocol, user, domain, prefix, port, service_domain)
 	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
-		return save_password_gpg(password, protocol, user, domain, prefix, port)
+		return save_password_gpg(password, protocol, user, domain, prefix, port, service_domain)
 	end
 	return false
 end
 
-local function lookup_password_keyring(protocol, user, domain, prefix, port)
+local function lookup_password_keyring(protocol, user, domain, prefix, port, service_domain)
 	if not user or not protocol or not domain then
 		return nil
 	end
 	local res, err = Command(SECRET_TOOL)
-		:arg({
+		:arg(tbl_remove_empty({
 			"lookup",
 			PLUGIN_NAME,
 			SECRET_VAULT_VERSION,
@@ -568,7 +572,9 @@ local function lookup_password_keyring(protocol, user, domain, prefix, port)
 			port and port or nil,
 			prefix and "prefix" or nil,
 			prefix and prefix or nil,
-		})
+			service_domain and "service_domain" or nil,
+			service_domain and service_domain or nil,
+		}))
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
@@ -580,13 +586,13 @@ local function lookup_password_keyring(protocol, user, domain, prefix, port)
 	return nil
 end
 
-local function lookup_password_gpg(protocol, user, domain, prefix, port)
+local function lookup_password_gpg(protocol, user, domain, prefix, port, service_domain)
 	if not user or not protocol or not domain then
 		return nil
 	end
 	local res, err = Command(PASS_TOOL)
 		:arg({
-			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port),
+			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port, service_domain),
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
@@ -599,18 +605,18 @@ local function lookup_password_gpg(protocol, user, domain, prefix, port)
 	return nil
 end
 
-local function lookup_password(protocol, user, domain, prefix, port)
+local function lookup_password(protocol, user, domain, prefix, port, service_domain)
 	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
-		return lookup_password_keyring(protocol, user, domain, prefix, port)
+		return lookup_password_keyring(protocol, user, domain, prefix, port, service_domain)
 	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
-		return lookup_password_gpg(protocol, user, domain, prefix, port)
+		return lookup_password_gpg(protocol, user, domain, prefix, port, service_domain)
 	end
 	return nil
 end
 
-local function clear_password_keyring(protocol, user, domain, prefix, port)
+local function clear_password_keyring(protocol, user, domain, prefix, port, service_domain)
 	local res, err = Command(SECRET_TOOL)
-		:arg({
+		:arg(tbl_remove_empty({
 			"clear",
 			PLUGIN_NAME,
 			SECRET_VAULT_VERSION,
@@ -624,7 +630,9 @@ local function clear_password_keyring(protocol, user, domain, prefix, port)
 			port and port or nil,
 			prefix and "prefix" or nil,
 			prefix and prefix or nil,
-		})
+			service_domain and "service_domain" or nil,
+			service_domain and service_domain or nil,
+		}))
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
@@ -648,14 +656,14 @@ local function clear_password_keyring(protocol, user, domain, prefix, port)
 	return false
 end
 
-local function clear_password_gpg(protocol, user, domain, prefix, port)
+local function clear_password_gpg(protocol, user, domain, prefix, port, service_domain)
 	-- pass rm -r -f gvfs/test1
 	local res, err = Command(PASS_TOOL)
 		:arg({
 			"rm",
 			"-r",
 			"-f",
-			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port),
+			build_secret_vault_entry_gpg(protocol, user, domain, prefix, port, service_domain),
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 		:stderr(Command.PIPED)
@@ -667,19 +675,20 @@ local function clear_password_gpg(protocol, user, domain, prefix, port)
 	return false
 end
 
-local function clear_password(protocol, user, domain, prefix, port)
+local function clear_password(protocol, user, domain, prefix, port, service_domain)
 	if get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.KEYRING then
-		return clear_password_keyring(protocol, user, domain, prefix, port)
+		return clear_password_keyring(protocol, user, domain, prefix, port, service_domain)
 	elseif get_state(STATE_KEY.PASSWORD_VAULT) == PASSWORD_VAULT.PASS then
-		return clear_password_gpg(protocol, user, domain, prefix, port)
+		return clear_password_gpg(protocol, user, domain, prefix, port, service_domain)
 	end
 	return false
 end
 
-local function extract_domain_user_from_uri(s)
+local function extract_info_from_uri(s)
 	local user
 	local domain
 	local port
+	local service_domain
 
 	-- Attempt 1: Look for user@domain:port first (if it exists)
 	-- davs://user@domain/dav
@@ -696,6 +705,7 @@ local function extract_domain_user_from_uri(s)
 		end
 	else
 		-- Attempt 2: No user@domain, so try to get domain from the start (before first comma or slash)
+		-- smb://ubuntu-server.local/hdd/
 		-- davs://domain/dav
 		scheme, temp_domain_part = s:match("^([^:]+)://([^/]+)")
 		if temp_domain_part then
@@ -708,8 +718,13 @@ local function extract_domain_user_from_uri(s)
 	end
 
 	local ssl = (s:match("^davs") or s:match("^ftps") or s:match("^ftpis") or s:match("^https")) and true or false
-	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$"):gsub("/$", "") or nil
-	return scheme, domain, user, ssl, prefix, port
+	local prefix = s:match(".*" .. (is_literal_string(domain) or "") .. (port and ":" .. port or "") .. "/(.+)$") or nil
+	if user then
+		local _service_domain, _user = user:match("^([^;]+);(.+)")
+		user = _service_domain and _user or user
+		service_domain = _service_domain and _service_domain
+	end
+	return scheme, domain, user, ssl, prefix, port, service_domain
 end
 
 local function uri_decode(str)
@@ -795,24 +810,17 @@ local function parse_devices(raw_input)
 			end
 			current_mount = { name = mount_name or "", uri = mount_uri or "" }
 
-			local m_scheme, m_domain, m_user, m_ssl, m_prefix, m_port = extract_domain_user_from_uri(mount_uri)
 			for m = #predefined_mounts, 1, -1 do
-				local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(predefined_mounts[m].uri)
-				if
-					m_scheme == scheme
-					and m_domain == domain
-					and m_user == user
-					and m_ssl == ssl
-					and m_prefix == prefix
-					and m_port == port
-				then
+				if predefined_mounts[m].uri:gsub("/+$", "") == mount_uri:gsub("/+$", "") then
 					current_mount = table.remove(predefined_mounts, m)
 				end
 			end
 
-			for _, value in pairs(SCHEME) do
-				if mount_uri:match("^" .. is_literal_string(value) .. ":") then
-					current_mount.scheme = value
+			if not current_mount.scheme then
+				for _, value in pairs(SCHEME) do
+					if mount_uri:match("^" .. is_literal_string(value) .. ":") then
+						current_mount.scheme = value
+					end
 				end
 			end
 
@@ -848,7 +856,9 @@ local function parse_devices(raw_input)
 				-- Attach to mount or volume
 				local target = current_mount or current_volume
 				if target then
-					target[key] = value
+					if key ~= "name" or not target[key] then
+						target[key] = value
+					end
 				end
 			else
 				local bus, device = line:match(".*:%s*'/dev/bus/usb/(%d+)/(%d+)'")
@@ -889,11 +899,19 @@ local function parse_devices(raw_input)
 			end
 		end
 
-		-- Attach mount points to volume
+		-- Attach mount points to volume, then remove it from mounts array
 		for j = #mounts, 1, -1 do
 			if is_mountpoint_belong_to_volume(mounts[j], v) then
 				table.insert(v.mounts, table.remove(mounts, j))
 			end
+		end
+	end
+
+	-- Remove shadowed mounts and attach unmapped mounts to itself
+	for _, m in ipairs(mounts) do
+		if m.is_shadowed ~= "1" and m.uri then
+			m.mounts = { tbl_deep_clone(m) }
+			table.insert(volumes, m)
 		end
 	end
 
@@ -902,82 +920,42 @@ local function parse_devices(raw_input)
 		table.insert(volumes, m)
 	end
 
-	for _, m in ipairs(mounts) do
-		if m.is_shadowed ~= "1" and m.uri then
-			m.mounts = { tbl_deep_clone(m) }
-			table.insert(volumes, m)
-		end
-	end
 	return volumes
 end
 
----@param target Device
----@return string
-local function get_mount_path(target)
-	if not target then
-		return ""
+---@param device Device
+---@return string|nil
+local function get_mounted_path(device)
+	if not device then
+		return nil
 	end
-	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
-	if
-		target.scheme == SCHEME.DAV
-		or target.scheme == SCHEME.AFP
-		or target.scheme == SCHEME.DAVS
-		or target.scheme == SCHEME.DAVSD
-		or target.scheme == SCHEME.DAVSSD
-		or target.scheme == SCHEME.FTP
-		or target.scheme == SCHEME.FTPS
-		or target.scheme == SCHEME.FTPIS
-		or target.scheme == SCHEME.GOOGLE_DRIVE
-		or target.scheme == SCHEME.ONE_DRIVE
-		or target.scheme == SCHEME.NFS
-		or target.scheme == SCHEME.SFTP
-		or target.scheme == SCHEME.DNS_SD
-	then
-		local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(target.uri)
-		local files, _ = fs.read_dir(Url(root_mountpoint), {})
-		for _, file in ipairs(files or {}) do
-			local f_scheme, f_domain, f_user, f_ssl, f_prefix, f_port = extract_domain_user_from_foldername(file.name)
-			if
-				scheme
-				and f_scheme
-				and scheme:match("^" .. is_literal_string(f_scheme))
-				and f_domain == domain
-				and f_user == user
-				and f_ssl == ssl
-				and f_prefix == prefix
-				and f_port == port
-			then
-				return tostring(file.url)
+	if device.scheme == SCHEME.FILE then
+		local mountpath = device.name and pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, device.name)
+		if is_folder_exist(mountpath) then
+			return mountpath
+		else
+			mountpath = device.uuid and pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, device.uuid) or ""
+			if is_folder_exist(mountpath) then
+				return mountpath
 			end
 		end
-		return ""
-	elseif target.scheme == SCHEME.SMB then
+		return nil
+	elseif device.uri then
 		local res, err = Command(SHELL)
 			:arg({
 				"-c",
-				"gio info " .. target.uri .. ' | grep "local path"',
+				"gio info " .. path_quote(device.uri) .. ' | grep -E "^local path: "',
 			})
 			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 			:stderr(Command.PIPED)
 			:stdout(Command.PIPED)
 			:output()
-		return string.sub(string.gsub(res.stdout, "^%s*(.-)%s*$", "%1"), 13)
-	elseif target.scheme == SCHEME.FILE and target.uuid then
-		local mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.name)
-		if is_folder_exist(mountpath) then
-			return mountpath
-		else
-			mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.uuid)
-			if is_folder_exist(mountpath) then
-				return mountpath
-			end
+		if err or (res and res.status and not res.status.success) then
+			return nil
 		end
-		return ""
-	elseif target.uri then
-		local uri = target.uri:gsub("//", "host=", 1)
-		return pathJoin(root_mountpoint, uri)
+		return res.stdout:match("^local path: (.+)$"):gsub("\n", "") or nil
 	end
-	return ""
+	return nil
 end
 
 ---@param device Device
@@ -989,22 +967,12 @@ local function is_mounted(device)
 			end
 		end
 	end
-	local mountpath = get_mount_path(device)
-	return mountpath and mountpath ~= "" and fs.cha(Url(mountpath))
-end
-
----@param device Device
----@return string
-local function get_mount_format(device)
-	if device.scheme == SCHEME.SMB then
-		return "%s\n\n%s"
-	end
-
-	return "%s\n%s"
+	local mountpath = get_mounted_path(device)
+	return mountpath and is_folder_exist(mountpath)
 end
 
 ---mount mtp device
----@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
+---@param opts {device: Device, username?:string, password?: string, service_domain?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
 local function mount_device(opts)
 	local device = opts.device
@@ -1014,19 +982,24 @@ local function mount_device(opts)
 	local is_pw_saved = opts.is_pw_saved
 	local skipped_secret_vault = opts.skipped_secret_vault
 	local username = opts.username
+	local service_domain = opts.service_domain
 	local error_msg = nil
-
-	-- prevent re-mount
-	if is_mounted(opts.device) then
-		return true
-	end
 
 	local auths = ""
 	local auth_string_format = ""
 	if password or username then
-		auth_string_format = get_mount_format(device)
-
-		auths = (path_quote(username) or "''") .. " " .. (path_quote(password) or "''")
+		if username then
+			auths = path_quote(username)
+			auth_string_format = auth_string_format .. "%s\n"
+		end
+		if service_domain then
+			auths = auths .. " " .. path_quote(service_domain)
+			auth_string_format = auth_string_format .. "%s\n"
+		end
+		if password then
+			auths = auths .. " " .. path_quote(password)
+			auth_string_format = auth_string_format .. "%s\n"
+		end
 	end
 
 	local res, err = Command(SHELL)
@@ -1072,8 +1045,25 @@ local function mount_device(opts)
 					-- case hard drive
 					save_password(password, device.scheme, device.uuid, device.uuid)
 				else
-					local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-					save_password(password, scheme, username or user, domain, prefix, port)
+					local scheme, domain, user, _, prefix, port, _service_domain = extract_info_from_uri(device.uri)
+					ya.err(
+						password,
+						scheme,
+						username or user,
+						domain,
+						prefix,
+						port,
+						service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
+					)
+					save_password(
+						password,
+						scheme,
+						username or user,
+						domain,
+						prefix,
+						port,
+						service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
+					)
 				end
 			end
 		end
@@ -1083,13 +1073,41 @@ local function mount_device(opts)
 			error_msg = string.format(NOTIFY_MSG.HEADLESS_DETECTED)
 			retries = max_retry
 		end
+		if res.stderr:match(".*is already mounted.*") then
+			return true
+		end
 		if res.stdout:find("Authentication Required") then
 			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
-			if stdout:find("\nUser: \n") then
+			if stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
 				if retries < max_retry then
-					username, _ =
-						show_input("Enter username " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":", false)
+					username, _ = show_input(
+						"Enter username " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+						false,
+						username or stdout:match("User %[(.*)%]:") or ""
+					)
 					if username == nil then
+						return false
+					end
+				else
+					error_msg = string.format(
+						NOTIFY_MSG.MOUNT_ERROR_USERNAME,
+						(device.name or "NO_NAME") .. " (" .. (device.scheme or "UNKNOWN_SCHEME") .. ")"
+					)
+				end
+			end
+			if
+				stdout:find("\nDomain: \n")
+				or stdout:find("\nDomain %[.*%]: \n")
+				or stdout:find("\nUser: \n")
+				or stdout:find("\nUser %[.*%]: \n")
+			then
+				if retries < max_retry then
+					service_domain, _ = show_input(
+						"Enter Domain " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+						false,
+						service_domain or stdout:match("Domain %[(.*)%]:") or "WORKGROUP"
+					)
+					if service_domain == nil then
 						return false
 					end
 				else
@@ -1099,7 +1117,13 @@ local function mount_device(opts)
 					)
 				end
 			end
-			if stdout:find("\nPassword: \n") or stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
+			if
+				stdout:find("\nPassword: \n")
+				or stdout:find("\nUser: \n")
+				or stdout:find("\nUser %[.*%]: \n")
+				or stdout:find("\nDomain: \n")
+				or stdout:find("\nDomain %[.*%]: \n")
+			then
 				if username ~= opts.username or (username == nil and is_pw_saved == nil) then
 					-- Prevent showing gpg passphrase twice
 					if not is_secret_vault_available(true) then
@@ -1110,8 +1134,16 @@ local function mount_device(opts)
 							-- case hard drive
 							password = lookup_password(device.scheme, device.uuid, device.uuid)
 						else
-							local scheme, domain, user, _, prefix, port = extract_domain_user_from_uri(device.uri)
-							password = lookup_password(scheme, username or user, domain, prefix, port)
+							local scheme, domain, user, _, prefix, port, _service_domain =
+								extract_info_from_uri(device.uri)
+							password = lookup_password(
+								scheme,
+								username or user,
+								domain,
+								prefix,
+								port,
+								service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
+							)
 						end
 						is_pw_saved = password ~= nil
 						if is_pw_saved then
@@ -1154,6 +1186,7 @@ local function mount_device(opts)
 		is_pw_saved = is_pw_saved,
 		skipped_secret_vault = skipped_secret_vault,
 		username = username,
+		service_domain = service_domain,
 	})
 end
 
@@ -1194,7 +1227,7 @@ local function list_gvfs_device_by_status(status, filter)
 	return devices_filtered
 end
 
---- Unmount a mtp device
+--- Unmount a mounted device/uri
 ---@param device Device
 ---@param eject boolean? eject = true if user want to safty unplug the device
 ---@param force boolean? Ignore outstanding file operations when unmounting or ejecting
@@ -1249,10 +1282,7 @@ local function select_device_which_key(devices)
 		end
 		table.insert(
 			cands,
-			{
-				on = tostring(allow_key_array[idx]),
-				desc = (d.name or "NO_NAME") .. " (" .. (d.scheme or "NO_SCHEME_DETECTED") .. ")",
-			}
+			{ on = tostring(allow_key_array[idx]), desc = (d.name or "NO_NAME") .. " (" .. d.scheme .. ")" }
 		)
 	end
 
@@ -1271,83 +1301,41 @@ end
 ---@param path string
 ---@param devices Device[]
 ---@return Device?
-local function get_device_from_path(path, devices)
+local function get_device_from_local_path(path, devices)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
-	local scheme, uri = string.match(path, "^" .. is_literal_string(root_mountpoint) .. "/([^:]+):host=(.+)")
-	local domain, user, ssl, prefix, port = nil, nil, nil, nil, nil
-	if not uri or not scheme then
+	if
+		not path:match("^" .. is_literal_string(root_mountpoint) .. "(.+)$")
+		and not path:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "(.+)$")
+	then
 		return nil
 	end
+	local path_info, err = Command(SHELL)
+		:arg({
+			"-c",
+			"gio info " .. path_quote(path) .. ' | grep "^uri:"',
+		})
+		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+		:stderr(Command.PIPED)
+		:stdout(Command.PIPED)
+		:output()
+	if err or (path_info and path_info.status and not path_info.status.success) then
+		return nil
+	end
+	local path_uri = path_info.stdout:match("^uri: (.+)$"):gsub("\n", "")
+	if not path_uri then
+		return nil
+	end
+
 	if not devices then
 		devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 	end
-	if
-		scheme == SCHEME.DAV
-		or scheme == SCHEME.AFP
-		or scheme == SCHEME.DAVS
-		or scheme == SCHEME.DAVSD
-		or scheme == SCHEME.DAVSSD
-		or scheme == SCHEME.FTP
-		or scheme == SCHEME.FTPS
-		or scheme == SCHEME.FTPIS
-		or scheme == SCHEME.GOOGLE_DRIVE
-		or scheme == SCHEME.ONE_DRIVE
-		or scheme == SCHEME.NFS
-		or scheme == SCHEME.SFTP
-		or scheme == SCHEME.SMB
-		or scheme == SCHEME.DNS_SD
-	then
-		domain, user, ssl, prefix, port = extract_domain_user_from_foldername(scheme .. ":host=" .. uri)
-		for _, device in ipairs(devices) do
-			local d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(device.uri)
-			if
-				d_scheme
-				and d_scheme:match("^" .. is_literal_string(scheme))
-				and d_domain == domain
-				and d_user == user
-				and d_ssl == ssl
-				and d_prefix == prefix
-				and d_port == port
-			then
-				return device
-			end
-			for _, mount in ipairs(device.mounts) do
-				d_scheme, d_domain, d_user, d_ssl, d_prefix, d_port = extract_domain_user_from_uri(mount.uri)
-				if
-					d_scheme
-					and d_scheme:match("^" .. is_literal_string(scheme))
-					and d_domain == domain
-					and d_user == user
-					and d_ssl == ssl
-					and d_prefix == prefix
-					and d_port == port
-				then
-					return device
-				end
-			end
+	for _, device in ipairs(devices) do
+		if device.uri and path_uri:match("^" .. is_literal_string(device.uri) .. ".*") then
+			return device
 		end
-	elseif string.find(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE)) then
-		local label_or_uuid = string.match(path, "^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/([^/]+)")
-		for _, device in ipairs(devices) do
-			if device.uuid == label_or_uuid then
+		for _, mount in ipairs(device.mounts) do
+			if mount.uri and path_uri:match("^" .. is_literal_string(mount.uri) .. ".*") then
 				return device
-			end
-			for _, mount in ipairs(device.mounts) do
-				if mount.name == label_or_uuid then
-					return device
-				end
-			end
-		end
-	else
-		uri = is_literal_string(scheme .. "://" .. uri)
-		for _, device in ipairs(devices) do
-			if device.uri:match("^" .. is_literal_string(uri) .. ".*") then
-				return device
-			end
-			for _, mount in ipairs(device.mounts) do
-				if mount.uri:match("^" .. is_literal_string(uri) .. ".*") then
-					return device
-				end
 			end
 		end
 	end
@@ -1365,12 +1353,12 @@ local function jump_to_device_mountpoint_action(device, retry)
 		info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		return
 	end
-	local mnt_point = get_mount_path(device)
-	-- local success = is_mounted(device)
-	if mnt_point == "" and device.uuid and not retry then
+	local mnt_path = get_mounted_path(device)
+	if not mnt_path and not retry then
 		-- case hard drive encrypted -> mount uuid changed
 		local matched_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
-			return d.encrypted_uuid == device.uuid or d.uuid == device.uuid
+			return (device.uuid and (d.encrypted_uuid == device.uuid or d.uuid == device.uuid))
+				or (device.uri and d.uri == device.uri)
 		end)
 		if #matched_devices >= 1 then
 			device = matched_devices[1]
@@ -1378,9 +1366,9 @@ local function jump_to_device_mountpoint_action(device, retry)
 		end
 	end
 
-	if mnt_point ~= "" then
+	if mnt_path then
 		set_state(STATE_KEY.PREV_CWD, current_dir())
-		ya.emit("cd", { mnt_point, raw = true })
+		ya.emit("cd", { mnt_path, raw = true })
 	else
 		error(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 	end
@@ -1482,16 +1470,15 @@ local function unmount_action(device, eject, force)
 		selected_device = device
 	end
 	if not selected_device then
-		info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
 		return
 	end
 
-	local mount_path = get_mount_path(selected_device)
-	if selected_device.uuid then
+	local mount_path = get_mounted_path(selected_device)
+	if selected_device.uuid and mount_path then
 		redirect_unmounted_tab_to_home(mount_path, true)
 	end
 	local success = unmount_gvfs(selected_device, eject, force)
-	if success and not selected_device.uuid then
+	if success and not selected_device.uuid and mount_path then
 		redirect_unmounted_tab_to_home(mount_path, true)
 		-- cd to home for all tabs within the device, and then restore the tabs location
 	end
@@ -1499,7 +1486,7 @@ end
 
 local function remount_keep_cwd_unchanged_action()
 	local devices = list_gvfs_device()
-	local current_tab_device = get_device_from_path(current_dir(), devices)
+	local current_tab_device = get_device_from_local_path(current_dir(), devices)
 	if not current_tab_device then
 		return
 	end
@@ -1508,7 +1495,7 @@ local function remount_keep_cwd_unchanged_action()
 	local saved_matched_tabs = {}
 	-- cd to home for all tabs within the device, and then restore the tabs location
 	for _, tab in ipairs(tabs) do
-		local tab_device = get_device_from_path(tostring(tab.cwd), devices)
+		local tab_device = get_device_from_local_path(tostring(tab.cwd), devices)
 		if tab_device and tab_device.name == current_tab_device.name then
 			table.insert(saved_matched_tabs, tab)
 			ya.emit("cd", {
@@ -1626,7 +1613,15 @@ local function add_or_edit_mount_action(is_edit)
 		error(NOTIFY_MSG.UNSUPPORTED_MANUALLY_MOUNT_SCHEME, tostring(_scheme))
 		return
 	end
-
+	if scheme == SCHEME.SMB then
+		mount.service_domain = mount.uri:match("^smb://([^;]+);")
+		if not mount.service_domain then
+			mount.service_domain, _ = show_input("Enter SMB domain:", false, "WORKGROUP")
+		end
+		if not mount.service_domain then
+			return
+		end
+	end
 	mount.name, _ = show_input("Enter display name:", false, mount.name or uri)
 
 	if mount.name == nil then
@@ -1644,10 +1639,17 @@ local function add_or_edit_mount_action(is_edit)
 			unmount_action(mounts[selected_idx], false, true)
 		end
 		if mount.uri ~= mounts[selected_idx].uri then
-			local old_scheme, old_domain, old_user, _, old_prefix, old_port =
-				extract_domain_user_from_uri(mounts[selected_idx].uri)
+			local old_scheme, old_domain, old_user, _, old_prefix, old_port, old_service_domain =
+				extract_info_from_uri(mounts[selected_idx].uri)
 			if old_domain and old_scheme and is_secret_vault_available(true) then
-				clear_password(old_scheme, old_user, old_domain, old_prefix, old_port)
+				clear_password(
+					old_scheme,
+					old_user,
+					old_domain,
+					old_prefix,
+					old_port,
+					old_service_domain or mounts[selected_idx].service_domain
+				)
 			end
 		end
 		mounts[selected_idx] = mount
@@ -1677,10 +1679,17 @@ local function remove_mount_action()
 		unmount_action(mount, false, true)
 	end
 	-- run_command("gio", { "mount", "-u", mount.uri })
-	local old_scheme, old_domain, old_user, _, old_prefix, old_port =
-		extract_domain_user_from_uri(mounts[selected_idx].uri)
+	local old_scheme, old_domain, old_user, _, old_prefix, old_port, old_service_domain =
+		extract_info_from_uri(mounts[selected_idx].uri)
 	if old_domain and old_scheme and is_secret_vault_available(true) then
-		clear_password(old_scheme, old_user, old_domain, old_prefix, old_port)
+		clear_password(
+			old_scheme,
+			old_user,
+			old_domain,
+			old_prefix,
+			old_port,
+			old_service_domain or mount.service_domain
+		)
 	end
 	local removed_mount = table.remove(mounts, selected_idx)
 	set_state(STATE_KEY.MOUNTS, mounts)

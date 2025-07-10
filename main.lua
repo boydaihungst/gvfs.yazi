@@ -708,7 +708,7 @@ local function extract_domain_user_from_uri(s)
 	end
 
 	local ssl = (s:match("^davs") or s:match("^ftps") or s:match("^ftpis") or s:match("^https")) and true or false
-	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$") or nil
+	local prefix = s:match(".*" .. (domain or "") .. (port and ":" .. port or "") .. "/(.+)$"):gsub("/$", "") or nil
 	return scheme, domain, user, ssl, prefix, port
 end
 
@@ -931,7 +931,6 @@ local function get_mount_path(target)
 		or target.scheme == SCHEME.ONE_DRIVE
 		or target.scheme == SCHEME.NFS
 		or target.scheme == SCHEME.SFTP
-		or target.scheme == SCHEME.SMB
 		or target.scheme == SCHEME.DNS_SD
 	then
 		local scheme, domain, user, ssl, prefix, port = extract_domain_user_from_uri(target.uri)
@@ -952,6 +951,17 @@ local function get_mount_path(target)
 			end
 		end
 		return ""
+	elseif target.scheme == SCHEME.SMB then
+		local res, err = Command(SHELL)
+			:arg({
+				"-c",
+				"gio info " .. target.uri .. ' | grep "local path"',
+			})
+			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+			:stderr(Command.PIPED)
+			:stdout(Command.PIPED)
+			:output()
+		return string.sub(string.gsub(res.stdout, "^%s*(.-)%s*$", "%1"), 13)
 	elseif target.scheme == SCHEME.FILE and target.uuid then
 		local mountpath = pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, target.name)
 		if is_folder_exist(mountpath) then
@@ -983,6 +993,16 @@ local function is_mounted(device)
 	return mountpath and mountpath ~= "" and fs.cha(Url(mountpath))
 end
 
+---@param device Device
+---@return string
+local function get_mount_format(device)
+	if device.scheme == SCHEME.SMB then
+		return "%s\n\n%s"
+	end
+
+	return "%s\n%s"
+end
+
 ---mount mtp device
 ---@param opts {device: Device,username?:string, password?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
@@ -1004,14 +1024,9 @@ local function mount_device(opts)
 	local auths = ""
 	local auth_string_format = ""
 	if password or username then
-		if username then
-			auths = path_quote(username)
-			auth_string_format = auth_string_format .. "%s\n"
-		end
-		if password then
-			auths = auths .. " " .. path_quote(password)
-			auth_string_format = auth_string_format .. "%s\n"
-		end
+		auth_string_format = get_mount_format(device)
+
+		auths = (path_quote(username) or "''") .. " " .. (path_quote(password) or "''")
 	end
 
 	local res, err = Command(SHELL)

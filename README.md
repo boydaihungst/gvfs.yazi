@@ -8,6 +8,7 @@
   - [Requirements](#requirements)
   - [Installation](#installation)
   - [Usage](#usage)
+  - [Note for mounting using fstab](#note-for-mounting-using-fstab)
   <!--toc:end-->
 
 [gvfs.yazi](https://github.com/boydaihungst/gvfs.yazi) uses [gvfs](https://wiki.gnome.org/Projects/gvfs) and [gio from glib](https://github.com/GNOME/glib) to transparently mount and unmount devices in read/write mode,
@@ -200,3 +201,7 @@ previewers = [
   #... the rest of previewers
 ]
 ```
+
+## Note for mounting using fstab
+
+If you are using fstab to mount your devices, you need to add `x-gvfs-show` to the mount options. And with this this plugin can only use `jump-to-device` and `jump-back-prev-cwd` actions.

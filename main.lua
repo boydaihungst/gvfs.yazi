@@ -23,6 +23,7 @@ local NOTIFY_MSG = {
 	CMD_NOT_FOUND = 'Command "%s" not found. Make sure it is installed.',
 	MOUNT_SUCCESS = 'Mounted: "%s"',
 	MOUNT_ERROR = "Mount error: %s",
+	CANT_MOUNT_DEVICE = "This device can't be mounted: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
 	EJECT_SUCCESS = 'Ejected "%s", it can safely be removed',
@@ -122,6 +123,7 @@ local ACTION = {
 ---@field activation_root string?
 ---@field uri string
 ---@field is_manually_added boolean?
+---@field can_mount "1"|"0"|nil
 ---@field can_unmount "1"|"0"
 ---@field can_eject "1"|"0"
 ---@field should_automount "1"|"0"
@@ -730,6 +732,8 @@ local function is_mountpoint_belong_to_volume(mount, volume)
 			or (mount.uuid and mount.uuid == volume.uuid)
 			or (mount["unix-device"] and mount["unix-device"] == volume["unix-device"])
 			or (mount.bus and mount.device and mount.bus == volume.bus and mount.device == volume.device)
+			-- Case fstab with `x-gvfs-show`
+			or (volume.class == "network" and mount.name and mount.name == volume.name and mount.scheme == SCHEME.FILE)
 		)
 end
 
@@ -844,7 +848,7 @@ local function parse_devices(raw_input)
 			v.scheme = SCHEME.FILE
 		-- Attach scheme to volume
 		-- local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
-		elseif v.uuid and not v.uuid:match("([^:]+)://(.+)") then
+		elseif (v.class == "network" and v.can_mount == "0") or v.uuid and not v.uuid:match("([^:]+)://(.+)") then
 			v.scheme = SCHEME.FILE
 		else
 			for _, value in pairs(SCHEME) do
@@ -877,7 +881,6 @@ local function parse_devices(raw_input)
 		m.mounts = { tbl_deep_clone(m) }
 		table.insert(volumes, m)
 	end
-
 	return volumes
 end
 
@@ -887,7 +890,7 @@ local function get_mounted_path(device)
 	if not device then
 		return nil
 	end
-	if device.scheme == SCHEME.FILE then
+	if device.scheme == SCHEME.FILE and device.class ~= "network" then
 		local mountpath = device.name and pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, device.name)
 		if is_folder_exist(mountpath) then
 			return mountpath
@@ -898,11 +901,13 @@ local function get_mounted_path(device)
 			end
 		end
 		return nil
-	elseif device.uri then
+	elseif device.uri or (#device.mounts > 0 and device.mounts[1].uri) then
 		local res, err = Command(SHELL)
 			:arg({
 				"-c",
-				"gio info " .. path_quote(device.uri) .. ' | grep -E "^local path: "',
+				"gio info "
+					.. path_quote(device.uri or (#device.mounts > 0 and device.mounts[1].uri))
+					.. ' | grep -E "^local path: "',
 			})
 			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
 			:stderr(Command.PIPED)
@@ -1229,10 +1234,10 @@ local function select_device_which_key(devices)
 		if idx > #allow_key_array then
 			break
 		end
-		table.insert(
-			cands,
-			{ on = tostring(allow_key_array[idx]), desc = (d.name or "NO_NAME") .. " (" .. d.scheme .. ")" }
-		)
+		table.insert(cands, {
+			on = tostring(allow_key_array[idx]),
+			desc = (d.name or "NO_NAME") .. " (" .. (d.scheme or "UNKNOWN_SCHEME") .. ")",
+		})
 	end
 
 	if #cands == 0 then
@@ -1276,7 +1281,7 @@ local function get_device_from_local_path(path, devices)
 	end
 
 	if not devices then
-		devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
+		devices = list_gvfs_device()
 	end
 	for _, device in ipairs(devices) do
 		if device.uri and path_uri:match("^" .. is_literal_string(device.uri) .. ".*") then
@@ -1343,7 +1348,9 @@ local function mount_action(opts)
 	local selected_device
 	-- Let user select a device if device is not specified
 	if not opts or not opts.device then
-		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.NOT_MOUNTED)
+		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.NOT_MOUNTED, function(d)
+			return d.can_mount ~= "0"
+		end)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if #list_devices == 0 then
@@ -1408,7 +1415,9 @@ end)
 local function unmount_action(device, eject, force)
 	local selected_device
 	if not device then
-		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
+		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
+			return d.can_mount ~= "0"
+		end)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if not selected_device and #list_devices == 0 then
@@ -1438,6 +1447,9 @@ local function remount_keep_cwd_unchanged_action()
 	local current_tab_device = get_device_from_local_path(current_dir(), devices)
 	if not current_tab_device then
 		return
+	end
+	if current_tab_device.can_mount == "0" then
+		info(NOTIFY_MSG.CANT_MOUNT_DEVICE, current_tab_device.name)
 	end
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	local tabs = save_tab_hovered()

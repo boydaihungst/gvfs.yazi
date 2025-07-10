@@ -405,8 +405,6 @@ local function is_secret_vault_available_gpg(unlock_vault_dialog, is_second_run)
 
 	if res then
 		-- Case unlocked
-		-- S KEYINFO CE3CD21A3A0DCB5EF57B4494AC37127EB207DE6A D - - - P - - -
-		-- S KEYINFO 56FB5F16C444102573EF8F1FB666AE48CD39CB4C D - - - C - - -
 		if res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ 1 ") or res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ .+ C ") then
 			return true
 		elseif unlock_vault_dialog and res.stdout:match(".* KEYINFO [^ ]+ .+ .+ .+ - ") then
@@ -657,7 +655,6 @@ local function clear_password_keyring(protocol, user, domain, prefix, port, serv
 end
 
 local function clear_password_gpg(protocol, user, domain, prefix, port, service_domain)
-	-- pass rm -r -f gvfs/test1
 	local res, err = Command(PASS_TOOL)
 		:arg({
 			"rm",
@@ -691,7 +688,6 @@ local function extract_info_from_uri(s)
 	local service_domain
 
 	-- Attempt 1: Look for user@domain:port first (if it exists)
-	-- davs://user@domain/dav
 	local scheme, temp_user, temp_domain_part = s:match("^([^:]+)://([^@/]+)@([^/]+)")
 	if temp_user and temp_domain_part then
 		-- If user@domain found, the domain might be followed by a comma
@@ -705,8 +701,6 @@ local function extract_info_from_uri(s)
 		end
 	else
 		-- Attempt 2: No user@domain, so try to get domain from the start (before first comma or slash)
-		-- smb://ubuntu-server.local/hdd/
-		-- davs://domain/dav
 		scheme, temp_domain_part = s:match("^([^:]+)://([^/]+)")
 		if temp_domain_part then
 			domain, port = temp_domain_part:match("^([^:/]+):([^:/]+)")
@@ -725,42 +719,6 @@ local function extract_info_from_uri(s)
 		service_domain = _service_domain and _service_domain
 	end
 	return scheme, domain, user, ssl, prefix, port, service_domain
-end
-
-local function uri_decode(str)
-	if not str then
-		return nil
-	end
-	str = string.gsub(str, "+", " ")
-	str = string.gsub(str, "%%(%x%x)", function(h)
-		return string.char(tonumber(h, 16))
-	end)
-	return str
-end
-
-local function extract_domain_user_from_foldername(s)
-	local user
-	local domain
-	local ssl = false
-	local prefix
-	local scheme
-	local port
-	scheme, s = s:match("^([^:]+):(.+)")
-
-	for part in s:gmatch("([^,]+)") do
-		if part:match("^host=(.+)") then
-			domain = part:match("^host=([^,/]+)")
-		end
-	end
-	domain = uri_decode(s:match("^host=([^,]+)"))
-	user = uri_decode(s:match(".*user=([^,]+)"))
-	ssl = s:match(".*ssl=true") and true or false
-	prefix = uri_decode(s:match(".*prefix=([^,]+)"))
-	port = s:match(".*port=([^,]+)")
-	if prefix then
-		prefix = prefix:match("/(.+)")
-	end
-	return scheme, domain, user, ssl, prefix, port
 end
 
 local function is_mountpoint_belong_to_volume(mount, volume)
@@ -971,7 +929,7 @@ local function is_mounted(device)
 	return mountpath and is_folder_exist(mountpath)
 end
 
----mount mtp device
+---mount device
 ---@param opts {device: Device, username?:string, password?: string, service_domain?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
 ---@return boolean
 local function mount_device(opts)
@@ -1046,15 +1004,6 @@ local function mount_device(opts)
 					save_password(password, device.scheme, device.uuid, device.uuid)
 				else
 					local scheme, domain, user, _, prefix, port, _service_domain = extract_info_from_uri(device.uri)
-					ya.err(
-						password,
-						scheme,
-						username or user,
-						domain,
-						prefix,
-						port,
-						service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
-					)
 					save_password(
 						password,
 						scheme,

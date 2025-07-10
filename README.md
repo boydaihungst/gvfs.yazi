@@ -17,7 +17,7 @@ allowing you to navigate inside, view, and edit individual or groups of files.
 Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), One drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), DNS-SD, DAV (WebDAV), AFP, AFC.
 You need to install corresponding packages to use them.
 
-Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
+Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, SMB, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive) or list of added scheme/mount URI.
 For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
@@ -156,7 +156,7 @@ prepend_keymap = [
 
     # Add|Edit|Remove mountpoint: smb, sftp, ftp, nfs, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
     # Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
-    # For example: smb://user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
+    # For example: smb://user@192.168.1.2/share, smb://WORKGROUP;user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
     # - Scheme/Mount URIs shouldn't contain password.
     # - Google Drive, One drive are mounted automatically via GNOME Online Accounts (GOA). Avoid adding them. Use GOA instead: ./GNOME_ONLINE_ACCOUNTS_GOA.md
     # - MTP, GPhoto2, AFC, Hard disk/drive are listed automatically. Avoid adding them

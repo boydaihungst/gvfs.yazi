@@ -6,6 +6,13 @@
 > - Because GOA need to open browser to login to your google-drive or onedrive account.
 >   So this only works on GUI session. Headless session will not work.
 
+> [!IMPORTANT]
+>
+> After testing google-drive, seems like it is not working very well.
+> By default, it will use ID for files, folders instead of name.
+> So I will not recommend to use google-drive. Unless you have a good reason.
+> You can use rclone to mount instead of gvfs.yazi.
+
 ### Install GNOME Online Accounts (GOA)
 
 ```bash

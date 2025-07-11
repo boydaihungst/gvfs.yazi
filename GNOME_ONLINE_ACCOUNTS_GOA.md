@@ -28,7 +28,7 @@ sudo pacman -S gnome-online-accounts gnome-control-center gvfs-goa
   ```
 
 - Select `Google` or `OneDrive` > `Sign in`
-- Login via browser. Accept to open GOA from browser.
+- Login via browser. Tick allow access to your Google Drive and OneDrive if asked.
 - You account will be added to `Your Accounts` section after login successfully.
 - Now you can use `mount` action to mount google-drive or onedrive.
 

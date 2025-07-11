@@ -17,9 +17,9 @@ allowing you to navigate inside, view, and edit individual or groups of files.
 Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), One drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), DNS-SD, DAV (WebDAV), AFP, AFC.
 You need to install corresponding packages to use them.
 
-Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, SMB, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
+Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, SMB, NFSv4, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
-By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive) or list of added scheme/mount URI.
+By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive, google drive, one drive, fstab with x-gvfs-show) or list of added mount URIs.
 For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
 
 > [!NOTE]
@@ -129,6 +129,9 @@ require("gvfs"):setup({
 
   -- (Optional) save password automatically after mounting. Default: false
   save_password_autoconfirm = true,
+  -- (Optional) mountpoint of gvfs. Default: /run/user/USER_ID/gvfs
+  -- On some system it could be ~/.gvfs
+  -- root_mountpoint = (os.getenv("XDG_RUNTIME_DIR") or ("/run/user/" .. ya.uid())) .. "/gvfs"
 })
 ```
 
@@ -204,7 +207,7 @@ previewers = [
 
 ## Note for mounting using fstab
 
-If you are using fstab to mount your devices, you need to add `x-gvfs-show` to the mount options. And with this this plugin can only use `jump-to-device` and `jump-back-prev-cwd` actions.
+If you are using fstab to mount, you need to add `x-gvfs-show` to the mount options. And with tis you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
 
 For example:
 

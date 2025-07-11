@@ -131,6 +131,7 @@ require("gvfs"):setup({
   save_password_autoconfirm = true,
   -- (Optional) mountpoint of gvfs. Default: /run/user/USER_ID/gvfs
   -- On some system it could be ~/.gvfs
+  -- You can't choose this path, it will be created automatically, Only changed if you know where gvfs mountpoint is.
   -- root_mountpoint = (os.getenv("XDG_RUNTIME_DIR") or ("/run/user/" .. ya.uid())) .. "/gvfs"
 })
 ```

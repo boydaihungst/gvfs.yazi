@@ -182,7 +182,7 @@ Replace `USER_NAME` with your real user name (run `whoami` to get username).
 
 ```toml
 [plugin]
-preloaders = [
+prepend_preloaders = [
   # Do not preload files in mounted locations:
   # Environment variable won't work here.
   # Using absolute path instead.
@@ -192,7 +192,7 @@ preloaders = [
   { name = "/run/media/USER_NAME/**/*", run = "noop" },
   #... the rest of preloaders
 ]
-previewers = [
+prepend_previewers = [
   # Allow to preview folder.
   { name = "*/", run = "folder", sync = true },
   # Do not previewing files in mounted locations (uncomment to except text file):

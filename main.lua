@@ -733,7 +733,7 @@ local function is_mountpoint_belong_to_volume(mount, volume)
 			or (mount["unix-device"] and mount["unix-device"] == volume["unix-device"])
 			or (mount.bus and mount.device and mount.bus == volume.bus and mount.device == volume.device)
 			-- Case fstab with `x-gvfs-show`
-			or (volume.class == "network" and mount.name and mount.name == volume.name and mount.scheme == SCHEME.FILE)
+			or (mount.name and mount.name == volume.name and mount.scheme == SCHEME.FILE)
 		)
 end
 
@@ -848,7 +848,7 @@ local function parse_devices(raw_input)
 			v.scheme = SCHEME.FILE
 		-- Attach scheme to volume
 		-- local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
-		elseif (v.class == "network" and v.can_mount == "0") or v.uuid and not v.uuid:match("([^:]+)://(.+)") then
+		elseif (v.can_mount == "0") or v.uuid and not v.uuid:match("([^:]+)://(.+)") then
 			v.scheme = SCHEME.FILE
 		else
 			for _, value in pairs(SCHEME) do
@@ -890,18 +890,7 @@ local function get_mounted_path(device)
 	if not device then
 		return nil
 	end
-	if device.scheme == SCHEME.FILE and device.class ~= "network" then
-		local mountpath = device.name and pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, device.name)
-		if is_folder_exist(mountpath) then
-			return mountpath
-		else
-			mountpath = device.uuid and pathJoin(GVFS_ROOT_MOUNTPOINT_FILE, device.uuid) or ""
-			if is_folder_exist(mountpath) then
-				return mountpath
-			end
-		end
-		return nil
-	elseif device.uri or (#device.mounts > 0 and device.mounts[1].uri) then
+	if device.uri or (#device.mounts > 0 and device.mounts[1].uri) then
 		local res, err = Command(SHELL)
 			:arg({
 				"-c",

@@ -171,6 +171,8 @@ prepend_keymap = [
 
     # Jump
     { on = [ "g", "m" ], run = "plugin gvfs -- jump-to-device", desc = "Select device then jump to its mount point" },
+    # If you use `x-systemd.automount` in /etc/fstab or manually added automount unit, you can use `--automount` to automount device automatically
+    { on = [ "g", "m" ], run = "plugin gvfs -- jump-to-device --automount", desc = "Automount then select device to jump to its mount point" },
     { on = [ "`", "`" ], run = "plugin gvfs -- jump-back-prev-cwd", desc = "Jump back to the position before jumped to device" },
 ]
 ```
@@ -208,10 +210,39 @@ prepend_previewers = [
 
 ## Note for mounting using fstab
 
-If you are using fstab to mount, you need to add `x-gvfs-show` to the mount options. And with tis you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
+If you are using fstab to mount, you need to add `x-gvfs-show` to the mount options. And with it you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
 
-For example:
+- Example `/etc/fstab`:
 
-```
-//192.168.1.10/hdd  /mnt/myshare  cifs  credentials=/etc/samba/credentials,x-gvfs-show,iocharset=utf8,uid=1000,gid=1000,file_mode=0660,dir_mode=0770,nofail  0  0
-```
+  - Mount on demand (manually mount):
+
+    ```
+    192.168.1.10/hdd  /mnt/myshare  cifs  noauto,credentials=/etc/samba/credentials,x-gvfs-show,iocharset=utf8,uid=1000,gid=1000,file_mode=0660,dir_mode=0770,nofail  0 0
+    UUID=XXXX-XXXX  /mnt/myshare2  exfat  noauto,defaults,x-gvfs-show  0 0
+    ```
+
+  - Mount on access, add `x-systemd-automount` to the mount options:
+
+    Use `jump-to-device --automount`.
+    This will auto mount all mount entries that have `x-systemd-automount`, before jump to.
+
+  - Mount at boot, remove `noauto` from the mount options
+
+  Reload fstab:
+
+  ```sh
+  sudo systemctl daemon-reload && sudo systemctl restart local-fs.target && sudo mount -a
+  ```
+
+  If you changed mount options (like uid=, gid=, umask=, exfat, ntfs, etc.), already-mounted filesystems won't update unless you unmount and remount them.
+  You can manually remount a specific entry using:
+
+  ```sh
+  sudo umount /mnt/myshare
+  ```
+
+  And then:
+
+  ```sh
+  sudo mount -a
+  ```

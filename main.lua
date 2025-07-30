@@ -1287,7 +1287,11 @@ end
 
 --- Jump to device mountpoint
 ---@param device Device?
-local function jump_to_device_mountpoint_action(device, retry)
+local function jump_to_device_mountpoint_action(device, retry, automount)
+	if automount then
+		-- Trigger Automount
+		run_command(HOME .. "/.config/yazi/plugins/gvfs.yazi/assets/automount.sh", {})
+	end
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)
 		device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
@@ -1305,7 +1309,7 @@ local function jump_to_device_mountpoint_action(device, retry)
 		end)
 		if #matched_devices >= 1 then
 			device = matched_devices[1]
-			return jump_to_device_mountpoint_action(device, true)
+			return jump_to_device_mountpoint_action(device, true, automount)
 		end
 	end
 
@@ -1702,7 +1706,7 @@ function M:setup(opts)
 	end)
 end
 
----@param job {args: string[], args: {jump: boolean?, eject: boolean?, force: boolean?}}
+---@param job {args: string[], args: {jump: boolean?, eject: boolean?, force: boolean?, automount: boolean?}}
 function M:entry(job)
 	if not is_cmd_exist("gio") then
 		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
@@ -1739,7 +1743,8 @@ function M:entry(job)
 		remount_keep_cwd_unchanged_action()
 		-- select a device then go to its mounted point
 	elseif action == ACTION.JUMP_TO_DEVICE then
-		jump_to_device_mountpoint_action()
+		local automount = job.args.automount or false
+		jump_to_device_mountpoint_action(nil, nil, automount)
 	elseif action == ACTION.JUMP_BACK_PREV_CWD then
 		jump_to_prev_cwd_action()
 	elseif action == ACTION.ADD_MOUNT then

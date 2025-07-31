@@ -19,5 +19,5 @@ for unit in $(systemctl list-units --type=automount --no-legend | awk '{print $1
   fi
 
   # If not mounted, log and then access the directory to trigger the automount
-  ls "$path" >/dev/null 2>&1
+  ls "$path" >/dev/null 2>&1 &
 done

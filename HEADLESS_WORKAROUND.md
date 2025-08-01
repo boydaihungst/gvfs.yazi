@@ -74,4 +74,6 @@ polkit.addRule(function(action, subject) {
   groups $(whoami)
   ```
 
-Now you can use gvfs.yazi without any problem.
+- Ensure that `UsePAM yes` is set in `/etc/ssh/sshd_config` file. The Pluggable Authentication Modules (PAM) system, specifically pam_systemd, is responsible for creating a proper user session on login, which includes setting up the D-Bus session environment.
+
+  Now you can use gvfs.yazi without any problem.

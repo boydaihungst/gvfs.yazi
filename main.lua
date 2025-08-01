@@ -23,7 +23,7 @@ local NOTIFY_MSG = {
 	CMD_NOT_FOUND = 'Command "%s" not found. Make sure it is installed.',
 	MOUNT_SUCCESS = 'Mounted: "%s"',
 	MOUNT_ERROR = "Mount error: %s",
-	CANT_MOUNT_DEVICE = "This device can't be mounted: %s",
+	CANT_MOUNT_DEVICE = "This device can't be mounted or already mounted: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
 	EJECT_SUCCESS = 'Ejected "%s", it can safely be removed',
@@ -846,9 +846,9 @@ local function parse_devices(raw_input)
 		if not v.uuid and v.class == "device" and v["unix-device"] then
 			v.uuid = v["unix-device"]
 			v.scheme = SCHEME.FILE
-		-- Attach scheme to volume
-		-- local scheme, uri = string.match(path, "^" .. root_mountpoint .. "/([^:]+):host=(.+)")
+			-- Attach scheme to volume
 		elseif (v.can_mount == "0") or v.uuid and not v.uuid:match("([^:]+)://(.+)") then
+			-- NOTE: can_mount == "0" means that the volume is mounted fstab
 			v.scheme = SCHEME.FILE
 		else
 			for _, value in pairs(SCHEME) do
@@ -859,6 +859,10 @@ local function parse_devices(raw_input)
 					v.scheme = value
 				end
 			end
+		end
+		-- NOTE: Remove volumes without scheme (fstab)
+		if not v.scheme then
+			table.remove(volumes, i)
 		end
 
 		-- Attach mount points to volume, then remove it from mounts array
@@ -1153,12 +1157,14 @@ end
 ---@return Device[]
 local function list_gvfs_device_by_status(status, filter)
 	local devices = list_gvfs_device()
+
 	local devices_filtered = {}
 	for _, d in ipairs(devices) do
 		if filter and not filter(d) then
 			goto continue
 		end
 		local mounted = is_mounted(d)
+
 		if status == DEVICE_CONNECT_STATUS.MOUNTED and mounted then
 			table.insert(devices_filtered, d)
 		end
@@ -1342,20 +1348,58 @@ local function mount_action(opts)
 	-- Let user select a device if device is not specified
 	if not opts or not opts.device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.NOT_MOUNTED, function(d)
-			return d.can_mount ~= "0"
+			return true
 		end)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 
 		if #list_devices == 0 then
-			-- If every devices are mounted, then select the first one
+			-- If every devices are mounted, then jump to the first one
+			local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 			local list_devices_mounted = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
-				return d.can_mount ~= "0"
+				if d.scheme == SCHEME.FILE then
+					return (
+						d.mounts
+						and #d.mounts >= 1
+						and d.mounts[1].uri
+						and (
+							d.mounts[1].uri:match("^" .. is_literal_string("file://" .. root_mountpoint) .. "(.+)$")
+							or d.mounts[1].uri:match(
+								"^" .. is_literal_string("file://" .. GVFS_ROOT_MOUNTPOINT_FILE) .. "(.+)$"
+							)
+						)
+					)
+				end
+				return true
 			end)
 			selected_device = #list_devices_mounted >= 1 and list_devices_mounted[1] or nil
 			if not selected_device then
 				info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
+				return
 			end
+			--NOTE: Fall-safe x-gvfs-show
+			local status, err = Command(SHELL)
+				:arg({
+					"-c",
+					"gio info " .. path_quote(
+						selected_device.uri or (#selected_device.mounts > 0 and selected_device.mounts[1].uri)
+					) .. ' | grep -E "^unix mount:.*x-gvfs-show.*"',
+				})
+				:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+				:stderr(Command.PIPED)
+				:stdout(Command.PIPED)
+				:status()
+			if err then
+				error(NOTIFY_MSG.UNMOUNT_ERROR, tostring(err))
+				return
+			end
+			if status and status.code == 0 then
+				error(NOTIFY_MSG.UNMOUNT_ERROR, "Can't unmount device mounted through /etc/fstab")
+				return
+			end
+
+			jump_to_device_mountpoint_action(selected_device)
+			return true
 		end
 	else
 		selected_device = opts.device
@@ -1411,13 +1455,51 @@ end)
 local function unmount_action(device, eject, force)
 	local selected_device
 	if not device then
+		local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
+
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED, function(d)
-			return d.can_mount ~= "0"
+			if d.scheme == SCHEME.FILE then
+				return (
+					d.mounts
+					and #d.mounts >= 1
+					and d.mounts[1].uri
+					and (
+						d.mounts[1].uri:match("^" .. is_literal_string("file://" .. root_mountpoint) .. "(.+)$")
+						or d.mounts[1].uri:match(
+							"^" .. is_literal_string("file://" .. GVFS_ROOT_MOUNTPOINT_FILE) .. "(.+)$"
+						)
+					)
+				)
+			end
+			return true
 		end)
 		-- NOTE: Automatically select the first device if there is only one device
 		selected_device = #list_devices == 1 and list_devices[1] or list_devices[select_device_which_key(list_devices)]
 		if not selected_device and #list_devices == 0 then
 			info(NOTIFY_MSG.LIST_DEVICES_EMPTY)
+			return
+		end
+		--NOTE: Fall-safe x-gvfs-show
+		if selected_device then
+			local status, err = Command(SHELL)
+				:arg({
+					"-c",
+					"gio info " .. path_quote(
+						selected_device.uri or (#selected_device.mounts > 0 and selected_device.mounts[1].uri)
+					) .. ' | grep -E "^unix mount:.*x-gvfs-show.*"',
+				})
+				:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+				:stderr(Command.PIPED)
+				:stdout(Command.PIPED)
+				:status()
+			if err then
+				error(NOTIFY_MSG.UNMOUNT_ERROR, tostring(err))
+				return
+			end
+			if status and status.code == 0 then
+				error(NOTIFY_MSG.UNMOUNT_ERROR, "Can't unmount device mounted through /etc/fstab")
+				return
+			end
 		end
 	end
 	if device then
@@ -1446,6 +1528,7 @@ local function remount_keep_cwd_unchanged_action()
 	end
 	if current_tab_device.can_mount == "0" then
 		info(NOTIFY_MSG.CANT_MOUNT_DEVICE, current_tab_device.name)
+		return
 	end
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	local tabs = save_tab_hovered()

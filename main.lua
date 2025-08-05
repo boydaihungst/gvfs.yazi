@@ -1296,7 +1296,9 @@ end
 local function jump_to_device_mountpoint_action(device, retry, automount)
 	if automount then
 		-- Trigger Automount
-		run_command(HOME .. "/.config/yazi/plugins/gvfs.yazi/assets/automount.sh", {})
+		local automount_script = HOME .. "/.config/yazi/plugins/gvfs.yazi/assets/automount.sh"
+		run_command("chmod", { "+x", automount_script })
+		run_command(automount_script, {})
 	end
 	if not device then
 		local list_devices = list_gvfs_device_by_status(DEVICE_CONNECT_STATUS.MOUNTED)

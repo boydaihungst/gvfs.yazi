@@ -182,6 +182,10 @@ because GVFS is slow that can make yazi freeze when it preloads or previews a la
 Replace `1000` with your real user id (run `id -u` to get user id).
 Replace `USER_NAME` with your real user name (run `whoami` to get username).
 
+> [!IMPORTANT]
+>
+> For yazi nightly replace `name` with `url`
+
 ```toml
 [plugin]
 prepend_preloaders = [

@@ -37,6 +37,10 @@ For other protocols (smb, ftp, sftp, etc), use `add-mount` command to add [Schem
 
 https://github.com/user-attachments/assets/6aad98f7-081a-4e06-b398-5f7e8ca4ab39
 
+Google-drive:
+
+https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
+
 ## Features
 
 - Support all gvfs schemes/protocols (mtp, smb, ftp, sftp, nfs, gphoto2, afp, afc, sshfs, dav, davs, dav+sd, davs+sd, dns-sd)

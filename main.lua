@@ -1947,7 +1947,7 @@ local function load_gdrive_folder_action()
 		-- 	end
 		-- end
 	end
-	ya.sleep(0.5)
+	-- ya.sleep(0.5)
 	set_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER_RUNNING, false)
 	load_gdrive_folder_action()
 end

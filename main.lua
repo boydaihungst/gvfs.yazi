@@ -25,6 +25,7 @@ local NOTIFY_MSG = {
 	MOUNT_ERROR = "Mount error: %s",
 	CANT_MOUNT_DEVICE = "This device can't be mounted or already mounted: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
+	READING_GVFS_MOUNTED_FOLDER_ERROR = "Reading gvfs mounted folder error: %s",
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
 	EJECT_SUCCESS = 'Ejected "%s", it can safely be removed',
 	LIST_DEVICES_EMPTY = "No device or URI found.",
@@ -94,6 +95,8 @@ local STATE_KEY = {
 	PASSWORD_VAULT = "PASSWORD_VAULT",
 	KEY_GRIP = "KEY_GRIP",
 	INPUT_POSITION = "INPUT_POSITION",
+	TASKS_LOAD_GDRIVE_FOLDER = "TASKS_LOAD_GDRIVE_FOLDER",
+	TASKS_LOAD_GDRIVE_FOLDER_RUNNING = "TASKS_LOAD_GDRIVE_FOLDER_RUNNING",
 }
 
 ---@enum ACTION
@@ -106,7 +109,33 @@ local ACTION = {
 	ADD_MOUNT = "add-mount",
 	EDIT_MOUNT = "edit-mount",
 	REMOVE_MOUNT = "remove-mount",
+	LOAD_GDRIVE_FOLDER = "load-gdrive-folder",
 }
+
+---@class (exact) GdriveMountedFolderAttribute
+---@field display_name string
+---@field is_symlink "FALSE" | "TRUE"
+---@field name string
+---@field type string
+---@field size number
+---@field modified number
+---@field created number
+---@field access number
+---@field can_read boolean
+---@field can_write boolean
+---@field can_execute boolean
+---@field can_delete boolean
+---@field can_trash boolean
+---@field can_rename boolean
+
+---@class (exact) ChildrenFolderGioInfo
+---@field display_name string
+---@field uri string
+---@field unix_mount string
+---@field name string
+---@field type string
+---@field local_path string
+---@field attributes GdriveMountedFolderAttribute
 
 ---@class (exact) Device
 ---@field name string
@@ -198,6 +227,26 @@ end)
 local get_state = ya.sync(function(state, key)
 	return state[key]
 end)
+
+local enqueue_task = ya.sync(function(state, task_name, task_data)
+	if not state[task_name] or type(state[task_name]) ~= "table" then
+		state[task_name] = {}
+	end
+	for _, _task_data in ipairs(state[task_name]) do
+		if _task_data.folder_to_load == task_data.folder_to_load then
+			return
+		end
+	end
+	table.insert(state[task_name], task_data)
+end)
+
+local dequeue_task = ya.sync(function(state, task_name)
+	if not state[task_name] or type(state[task_name]) ~= "table" then
+		return {}
+	end
+	return table.remove(state[task_name])
+end)
+
 ---@param is_password boolean?
 local function show_input(title, is_password, value)
 	local input_value, input_pw_event = ya.input({
@@ -305,12 +354,18 @@ local function tbl_remove_empty(tbl)
 	return cleaned
 end
 
+local get_cwd = ya.sync(function()
+	return cx.active.current.cwd
+end)
+
 local current_dir = ya.sync(function()
 	return tostring(cx.active.current.cwd)
 end)
 
 ---@enum PUBSUB_KIND
 local PUBSUB_KIND = {
+	cd = "cd",
+	hover = "hover",
 	mounts_changed = "@" .. PLUGIN_NAME .. "-" .. "mounts-changed",
 	unmounted = PLUGIN_NAME .. "-" .. "unmounted",
 }
@@ -364,6 +419,10 @@ local function path_quote(path)
 	local result = "'" .. string.gsub(tostring(path), "'", "'\\''") .. "'"
 	return result
 end
+
+local current_hovered_folder_cwd = ya.sync(function()
+	return cx.active.preview.folder and cx.active.preview.folder.cwd
+end)
 
 local function is_secret_vault_available_keyring(unlock_vault_dialog)
 	local res, err = Command(SECRET_TOOL)
@@ -735,6 +794,153 @@ local function is_mountpoint_belong_to_volume(mount, volume)
 			-- Case fstab with `x-gvfs-show`
 			or (mount.name and mount.name == volume.name and mount.scheme == SCHEME.FILE)
 		)
+end
+
+--- Parser for gvfs mounted gdrive folder info
+---@param data string
+---@return ChildrenFolderGioInfo[]
+local function parse_gdrive_mountpoint_info(data)
+	---@type table[]
+	local result = {}
+	---@type table?
+	local current_item = nil
+
+	-- Iterate over each line of the input data.
+	for line in data:gmatch("([^\r\n]+)") do
+		-- First, try to match an indented attribute line, e.g., "  standard::type: 2"
+		local indent, attr_key, attr_value = line:match("^(%s+)[^:]+::([^:]+):%s+(.+)$")
+
+		if indent and attr_key and attr_value then
+			-- This is an attribute line. Add it to the current item's attribute sub-table.
+			if current_item then
+				-- Ensure the 'attributes' sub-table exists.
+				current_item.attributes = current_item.attributes or {}
+
+				-- Clean the key (e.g., "standard::type" -> "standard_type") and assign the value.
+				local clean_attr_key = attr_key:match("^%s*(.-)%s*$"):gsub("[%s%-]", "_")
+				if clean_attr_key == "can_read" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				elseif clean_attr_key == "can_write" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				elseif clean_attr_key == "can_execute" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				elseif clean_attr_key == "can_delete" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				elseif clean_attr_key == "can_trash" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				elseif clean_attr_key == "can_rename" then
+					current_item.attributes[clean_attr_key] = attr_value == "TRUE"
+				else
+					current_item.attributes[clean_attr_key] = attr_value
+				end
+			end
+		else
+			-- If it's not an attribute, try to match a top-level key-value pair.
+			-- The value part `(.*)` allows for keys with no value, like "attributes:".
+			local key, value = line:match("^%s*([^:]+):%s*(.*)$")
+
+			if key then
+				-- Clean the key by trimming whitespace and replacing spaces with underscores.
+				local clean_key = key:match("^%s*(.-)%s*$"):gsub("%s", "_")
+
+				-- The "display_name" key marks the beginning of a new item block.
+				if clean_key == "display_name" then
+					-- If we were processing a previous item, add it to the result list.
+					if current_item then
+						table.insert(result, current_item)
+					end
+					-- Start a new table for the new item.
+					current_item = {}
+				end
+
+				-- Add the property to the current item, provided we are inside an item block
+				-- and the key has a value.
+				if current_item and value and value ~= "" then
+					current_item[clean_key] = value
+				end
+			end
+		end
+	end
+
+	-- After the loop, if there's a pending item, add it to the results.
+	if current_item then
+		table.insert(result, current_item)
+	end
+
+	return result
+end
+
+local function get_gdrive_children_folder_info(parent_folder)
+	if not parent_folder then
+		return
+	end
+	parent_folder = tostring(parent_folder)
+	if
+		parent_folder:match(
+			"^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT) .. "/google-drive:host=gmail.com")
+		)
+	then
+		local output, err = Command(SHELL)
+			:arg({
+				"-c",
+				"gio info -a standard::display-name,standard::name,time::modified,time::created,time::access,standard::type,standard::is-symlink,standard::size,access::can-read,access::can-write,access::can-execute,access::can-delete,access::can-delete,access::can-rename "
+					.. path_quote(parent_folder)
+					.. "/*",
+			})
+			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+			:stderr(Command.PIPED)
+			:stdout(Command.PIPED)
+			:output()
+		if err then
+			error(NOTIFY_MSG.READING_GVFS_MOUNTED_FOLDER_ERROR, tostring(err))
+			return nil
+		end
+		if output and output.status.code == 0 then
+			return parse_gdrive_mountpoint_info(output.stdout)
+		end
+	end
+end
+
+--- Display real folder name using virtual files/folders
+---@param children_folder_info ChildrenFolderGioInfo[]
+local function display_virtual_children(cwd, children_folder_info)
+	if children_folder_info == nil or #children_folder_info == 0 then
+		return
+	end
+	local id = ya.id("ft")
+	local files = {}
+
+	ya.emit("update_files", { op = fs.op("part", { id = id, url = Url(cwd), files = {} }) })
+
+	for _, gdrive_mountpoint_info in ipairs(children_folder_info) do
+		if id ~= nil and id ~= "" then
+			local url = Url(cwd):join(gdrive_mountpoint_info.display_name)
+
+			local kind = gdrive_mountpoint_info.type == "directory" and 1
+				or (
+					gdrive_mountpoint_info.type == "regular" and 0
+					or (gdrive_mountpoint_info.type == "shortcut" and 4 or 16)
+				)
+
+			table.insert(
+				files,
+				File({
+					url = url,
+					cha = Cha({
+						kind = kind,
+						len = tonumber(gdrive_mountpoint_info.attributes.size or "0"),
+						atime = gdrive_mountpoint_info.attributes.access,
+						mtime = gdrive_mountpoint_info.attributes.modified,
+						ctime = gdrive_mountpoint_info.attributes.created,
+						btime = gdrive_mountpoint_info.attributes.modified,
+					}),
+				})
+			)
+		end
+	end
+
+	ya.emit("update_files", { op = fs.op("part", { id = id, url = Url(cwd), files = files }) })
+	ya.emit("update_files", { op = fs.op("done", { id = id, url = Url(cwd), cha = fs.cha(Url(cwd), false) }) })
 end
 
 local function parse_devices(raw_input)
@@ -1704,6 +1910,48 @@ local function add_or_edit_mount_action(is_edit)
 	save_mounts()
 end
 
+local function load_gdrive_folder_action()
+	if
+		get_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER_RUNNING)
+		or not get_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER)
+		or #get_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER) == 0
+	then
+		return
+	end
+	set_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER_RUNNING, true)
+	local data = dequeue_task(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER)
+	local folder_to_load_raw = data.folder_to_load
+	local self_load = data.self_load
+	local folder_to_load = Url(folder_to_load_raw)
+
+	local gdrive_mountpoint_children_info = get_gdrive_children_folder_info(folder_to_load_raw)
+	if gdrive_mountpoint_children_info then
+		display_virtual_children(folder_to_load, gdrive_mountpoint_children_info)
+	end
+	-- TODO: parent
+	if self_load then
+		-- ya.sleep(0.5)
+		-- if folder_to_load.parent and folder_to_load.parent.parent then
+		-- 	local gdrive_children_info_parents = get_gdrive_children_folder_info(folder_to_load.parent.parent)
+		-- 	if gdrive_children_info_parents then
+		-- 		display_virtual_children(folder_to_load.parent.parent, gdrive_children_info_parents)
+		-- 	end
+		-- end
+		-- TODO: Load preview
+		-- ya.sleep(0.5)
+		-- local hovered_folder_cwd = current_hovered_folder_cwd()
+		-- if hovered_folder_cwd then
+		-- 	local gdrive_children_info_parents = get_gdrive_children_folder_info(hovered_folder_cwd)
+		-- 	if gdrive_children_info_parents then
+		-- 		display_virtual_children(hovered_folder_cwd, gdrive_children_info_parents)
+		-- 	end
+		-- end
+	end
+	ya.sleep(0.5)
+	set_state(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER_RUNNING, false)
+	load_gdrive_folder_action()
+end
+
 local function remove_mount_action()
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	if #mounts == 0 then
@@ -1783,6 +2031,46 @@ function M:setup(opts)
 	end
 	set_state(STATE_KEY.MOUNTS, read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH)))
 
+	ps.sub(PUBSUB_KIND.cd, function()
+		local cwd = cx.active.current.cwd
+		if not cwd then
+			return
+		end
+
+		local cwd_raw = tostring(cwd)
+		if
+			cwd_raw:match(
+				"^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT) .. "/google-drive:host=gmail.com")
+			)
+		then
+			enqueue_task(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER, { folder_to_load = cwd_raw, self_load = true })
+			local args = ya.quote(ACTION.LOAD_GDRIVE_FOLDER)
+			ya.emit("plugin", {
+				self._id,
+				args,
+			})
+		end
+	end)
+
+	-- ps.sub(PUBSUB_KIND.hover, function()
+	-- 	local cwd = current_hovered_folder_cwd()
+	-- 	if not cwd then
+	-- 		return
+	-- 	end
+	-- 	local cwd_raw = tostring(cwd)
+	-- 	if
+	-- 		cwd_raw:match(
+	-- 			"^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT) .. "/google-drive:host=gmail.com")
+	-- 		)
+	-- 	then
+	-- 		enqueue_task(STATE_KEY.TASKS_LOAD_GDRIVE_FOLDER, { folder_to_load = cwd_raw, self_load = false })
+	-- 		local args = ya.quote(ACTION.LOAD_GDRIVE_FOLDER)
+	-- 		ya.emit("plugin", {
+	-- 			self._id,
+	-- 			args,
+	-- 		})
+	-- 	end
+	-- end)
 	ps.sub_remote(PUBSUB_KIND.mounts_changed, function(mounts)
 		set_state(STATE_KEY.MOUNTS, hex_decode_table(mounts))
 	end)
@@ -1838,6 +2126,8 @@ function M:entry(job)
 		add_or_edit_mount_action(true)
 	elseif action == ACTION.REMOVE_MOUNT then
 		remove_mount_action()
+	elseif action == ACTION.LOAD_GDRIVE_FOLDER then
+		load_gdrive_folder_action()
 	end
 	-- TODO: remove this after next yazi released
 	(ui.render or ya.render)()

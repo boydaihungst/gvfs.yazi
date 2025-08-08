@@ -8,10 +8,13 @@
 
 > [!IMPORTANT]
 >
-> After testing google-drive, seems like it is not working very well.
+> ~~After testing google-drive, seems like it is not working very well.
 > By default, it will use ID for files, folders instead of name.
 > So I will not recommend to use google-drive. Unless you have a good reason.
-> You can use rclone to mount instead of gvfs.yazi.
+> You can use rclone to mount instead of gvfs.yazi.~~
+>
+> Google-drive should work fine now. But to prevent lagging, I will disable loading files/folders name in previews panel.
+> That's mean only current folder and its parent folder is loaded, the preview panel will lazy-load when you enter folder.
 
 ### Install GNOME Online Accounts (GOA)
 

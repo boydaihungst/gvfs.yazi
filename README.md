@@ -20,7 +20,7 @@ You need to install corresponding packages to use them.
 Tested: MTP, Hard disk/drive (Encrypted and Unencrypted), GPhoto2 (PTP), DAV, SFTP, FTP, SMB, NFSv4, Google Drive, One Drive. You may need to unlock and turn screen on to mount some devices (Android MTP, etc.)
 
 By default, `mount` will automatically shows devices which have one of these protocals (MTP, GPhoto2, AFC, Hard disk/drive, google drive, one drive, fstab with x-gvfs-show) or list of added mount URIs.
-For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
+For other protocols (smb, ftp, sftp, etc), use `add-mount` command to add [Schemes URI format](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
 
 > [!NOTE]
 >
@@ -30,7 +30,7 @@ For other protocols (smb, ftp, sftp, etc), use `add-mount` action with [Schemes 
 > - Put files in Trash bin won't work on some protocols (Android MTP), use permanently delete instead.
 > - Scheme/Mount URIs shouldn't contain password, because they are saved as plain text in `yazi/config/gvfs.private`.
 > - MTP, GPhoto2, AFC, Hard disk/drive are listed automatically. So you also don't need to add them via `add-mount`
-> - Google Drive, One drive are mounted automatically via GNOME Online Accounts (GOA). So you don't need to add them via `add-mount`.
+> - Google Drive, One drive are created via GNOME Online Accounts (GOA). So you don't need to add them via `add-mount`.
 >   Guide to setup [GNOME_ONLINE_ACCOUNTS_GOA.md](./GNOME_ONLINE_ACCOUNTS_GOA.md)
 
 ## Preview
@@ -179,6 +179,7 @@ prepend_keymap = [
 
 It's highly recommended to add these lines to your `~/.config/yazi/yazi.toml`,
 because GVFS is slow that can make yazi freeze when it preloads or previews a large number of files.
+Especially when you use `Google-drive` or `One-drive`.
 Replace `1000` with your real user id (run `id -u` to get user id).
 Replace `USER_NAME` with your real user name (run `whoami` to get username).
 

@@ -164,10 +164,13 @@ prepend_keymap = [
 
     # Add|Edit|Remove mountpoint: smb, sftp, ftp, nfs, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
     # Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
-    # For example: smb://user@192.168.1.2/share, smb://WORKGROUP;user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
+    # Explain about the scheme: If it show like this: {ftp,ftps,ftpis}://[user@]host[:port]
+    #   -> Every value within [] are optional; values within {} you need to choose only one of them; The rest are hardcoded
+    #   -> {ftp,ftps,ftpis}://[user@]host[:port] => ftp://myusername@IP:PORT or ftps://myusername@github.com
+    # More examples: smb://user@192.168.1.2/share, smb://WORKGROUP;user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
     # - Scheme/Mount URIs shouldn't contain password.
     # - Google Drive, One drive are mounted automatically via GNOME Online Accounts (GOA). Avoid adding them. Use GOA instead: ./GNOME_ONLINE_ACCOUNTS_GOA.md
-    # - MTP, GPhoto2, AFC, Hard disk/drive are listed automatically. Avoid adding them
+    # - MTP, GPhoto2, AFC, Hard disk/drive, fstab with x-gvfs-show are listed automatically. Avoid adding them.
     { on = [ "M", "a" ], run = "plugin gvfs -- add-mount", desc = "Add a GVFS mount URI" },
     # Edit or remove a GVFS mount URI will clear saved passwords for that mount URI.
     { on = [ "M", "e" ], run = "plugin gvfs -- edit-mount", desc = "Edit a GVFS mount URI" },

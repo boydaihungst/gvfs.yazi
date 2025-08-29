@@ -1,14 +1,18 @@
 # Headless Workaround to start D-bus session
 
-<!--toc:start-->
+<!-- toc -->
 
-- [Headless Workaround to start D-bus session](#headless-workaround-to-start-d-bus-session)
-<!--toc:end-->
+- [Step 1: Connect to the target computer.](#step-1-connect-to-the-target-computer)
+- [Step 2: Run this command in the target computer terminal:](#step-2-run-this-command-in-the-target-computer-terminal)
+- [Step 3: (Optional) Add custom polkit rule to fix permission denied error when mounting a hardware device (Hard disk/drive, etc)](#step-3-optional-add-custom-polkit-rule-to-fix-permission-denied-error-when-mounting-a-hardware-device-hard-diskdrive-etc)
+- [Step 4: Reboot.](#step-4-reboot)
+
+<!-- tocstop -->
 
 > [!IMPORTANT]
 >
 > - Only apply this workaround if you see this error message: `GVFS.yazi can only run on DBUS session`.
-> - For headless session only, non-active console, like connect to a computer via SSH, etc.
+> - For headless session only (non-active console), like connect to a computer via SSH, etc.
 > - For systemd users only. Most mainstream distros use systemd by default.
 > - You only need to do this once.
 > - Mount a hardware device (Hard disk/drive, etc) may encounter permission denied error. Refer to custom polkit section to fix it.
@@ -22,9 +26,9 @@
 sudo loginctl enable-linger $(whoami)
 ```
 
-### Step 3: Reboot.
+Ensure that `UsePAM yes` is set in `/etc/ssh/sshd_config` file. The Pluggable Authentication Modules (PAM) system, specifically pam_systemd, is responsible for creating a proper user session on login, which includes setting up the D-Bus session environment.
 
-### Step 4: (Optional) Add custom polkit rule to fix permission denied error when mounting a hardware device (Hard disk/drive, etc)
+### Step 3: (Optional) Add custom polkit rule to fix permission denied error when mounting a hardware device (Hard disk/drive, etc)
 
 ```bash
 # Create a new polkit rule file
@@ -62,10 +66,11 @@ polkit.addRule(function(action, subject) {
   sudo systemctl restart polkit.service
   ```
 
-- Add user to `plugdev`. Then run `newgrp groupname` or log out and log back in.
+- Add user to `plugdev` group. Then run `newgrp plugdev` or log out and log back in.
 
   ```bash
   sudo usermod -a -G plugdev $(whoami)`
+  sudo newgrp plugdev
   ```
 
 - Verify the user is in the `plugdev` group.
@@ -74,6 +79,6 @@ polkit.addRule(function(action, subject) {
   groups $(whoami)
   ```
 
-- Ensure that `UsePAM yes` is set in `/etc/ssh/sshd_config` file. The Pluggable Authentication Modules (PAM) system, specifically pam_systemd, is responsible for creating a proper user session on login, which includes setting up the D-Bus session environment.
+### Step 4: Reboot.
 
-  Now you can use gvfs.yazi without any problem.
+Now you can use gvfs.yazi without any problem.

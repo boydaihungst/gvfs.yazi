@@ -1,18 +1,18 @@
 # There are two methods to securely store passwords
 
-<!--toc:start-->
+<!-- toc -->
 
-- [There are two methods to securely store passwords](#there-are-two-methods-to-securely-store-passwords)
-  - [Method 1. Use `secret-tool` with `Keyring` (Gnome Keyring or KWallet).](#method-1-use-secret-tool-with-keyring-gnome-keyring-or-kwallet)
-  - [Method 2. Use `pass` (Password Store) with `GPG` encryption subkey](#method-2-use-pass-password-store-with-gpg-encryption-subkey)
-  <!--toc:end-->
+- [Method 1. Use `secret-tool` with `Keyring` (Gnome Keyring or KWallet).](#method-1-use-secret-tool-with-keyring-gnome-keyring-or-kwallet)
+- [Method 2. Use `pass` (Password Store) with `GPG` encryption subkey](#method-2-use-pass-password-store-with-gpg-encryption-subkey)
+
+<!-- tocstop -->
 
 If you don't want to re-enter passwords everytime connect to a saved scheme/mount URI (SMB, FTP, etc), you can use `Keyring` + `secret-tool` or `pass` + `GPG` to store passwords. `Keyring` can only be use in GUI session, `GPG` can use in both Headless and GUI session.
 
 ## Method 1. Use `secret-tool` with `Keyring` (Gnome Keyring or KWallet).
 
-Best for GUI users.
-If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_WORKAROUND.md)), you can only use [Method 2. Use `pass` (Password Store) with GPG encryption subkey](#2-use-pass-password-store-with-gpg-encryption-subkey).
+Best for GUI users.  
+If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_WORKAROUND.md)), you can only use [Method 2. Use `pass` (Password Store) with `GPG` encryption subkey](#method-2-use-pass-password-store-with-gpg-encryption-subkey).
 
 - Install `secret-tool`:
 
@@ -20,25 +20,25 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
   # Ubuntu
   sudo apt install libsecret-tools
 
-  # Fedora (Not tested, please report if it works)
+  # Fedora
   sudo dnf install libsecret
 
   # Arch
   sudo pacman -S libsecret
   ```
 
-- Install `GNOME-Keyring` (or KWallet)
+- Install `GNOME-Keyring` (or KWallet):
 
   ```sh
   # Ubuntu
   sudo apt install gnome-keyring
   # Ubuntu GNOME already starts the keyring daemon automatically.
-  # If you're using another DE or a window manager, see manual startup notes below.
+  # If you're using other DE or window manager, see manual startup notes below.
 
-  # Fedora (Not tested, please report if it works)
+  # Fedora
   sudo dnf install gnome-keyring
   # Fedora Workstation (GNOME) starts the daemon automatically.
-  # If you're using another DE or a window manager, see manual startup notes below.
+  # If you're using other DE or window manager, see manual startup notes below.
 
   # Arch
   sudo pacman -S gnome-keyring
@@ -47,10 +47,10 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
 
   For other distros please ask gemini/chatgpt.
 
-- Manual Startup `gnome-keyring` if need
-  Check if it's running: `pgrep -fl gnome-keyring-daemon`. Skip this step if it's already running.
-  If you're using i3, Xfce, sway, hyprland or another WM. [Read more](<https://wiki.archlinux.org/title/GNOME/Keyring#Using_gnome-keyring-daemon_outside_desktop_environments_(KDE,_GNOME,_XFCE,_...)>)
-  Add this to your session startup (e.g., .xinitrc, ~/.xprofile, or your DE’s autostart system):
+- Manual Startup `gnome-keyring` if need:
+  Check if it's running: `pgrep -fl gnome-keyring-daemon`. Skip this step if it's already running.  
+  If you're using i3, Xfce, sway, hyprland or other WM/DE [Read this](<https://wiki.archlinux.org/title/GNOME/Keyring#Using_gnome-keyring-daemon_outside_desktop_environments_(KDE,_GNOME,_XFCE,_...)>)
+  Add this to your session startup (e.g., .xinitrc, ~/.xprofile, or your WM/DE’s autostart system):
 
   ```sh
   # Start gnome-keyring
@@ -66,13 +66,13 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
 
 - Add `password_vault = "keyring"` to setup function in `~/.config/yazi/init.lua`:
 
-```lua
-require("gvfs"):setup({
+  ```lua
+  require("gvfs"):setup({
   password_vault = "keyring",
-})
-```
+  })
+  ```
 
-Now you can use gvfs.yazi and save passwords to the keyring.
+Now you can use gvfs.yazi and save passwords to the keyring.  
 You only need to unlock the keyring once after login or after trigger gvfs.yazi plugin.
 
 - You can also auto unlock the keyring with PAM:
@@ -89,7 +89,7 @@ secret-tool clear gvfs 1
 
 ## Method 2. Use `pass` (Password Store) with `GPG` encryption subkey
 
-The only option for headless users.
+The only option for headless users.  
 Can use on both GUI and headless session (non-active console, Like connect to a computer via SSH, etc).
 
 - Install `pass` and `gpg`
@@ -113,8 +113,10 @@ Can use on both GUI and headless session (non-active console, Like connect to a 
   gpg --full-generate-key
   ```
 
-- Select `ECC (sign and encrypt)` and then select `Curve 25519` and `0 = key does not expire`. Usually you only need to press enter 3 times.
-  Then press `y` and `enter` to confirm. Enter name, email, comment, and passphrase. Remember the passphrase, which will be used for unlocking the key. Empty passphrase is also support but discouraged.
+- Select `ECC (sign and encrypt)` and then select `Curve 25519` and `0 = key does not expire`. Usually you only need to press enter 3 times.  
+  Then press `y` and `enter` to confirm. Enter name, email, comment, and passphrase.  
+  Remember the passphrase, which will be used for unlocking the key.  
+  Empty passphrase is also support but discouraged.
 
 - Get the `<KEY_ID>` and `KEY_GRIP` of created GPG key:
 
@@ -133,10 +135,8 @@ Can use on both GUI and headless session (non-active console, Like connect to a 
         Keygrip = BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
   ```
 
-  Subkey for encryption is the one ends with `[E]`
-
-  => `<KEY_ID>` is `zzzzzzzzzzzzz` and `<KEY_GRIP>` is `BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB`
-
+  Subkey for encryption is the one ends with `[E]`  
+  => `<KEY_ID>` is `zzzzzzzzzzzzz` and `<KEY_GRIP>` is `BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB`  
   There can be multiple subkeys, but we only need one.
 
 - Initialize the password store:
@@ -156,11 +156,11 @@ Can use on both GUI and headless session (non-active console, Like connect to a 
   ```
 
 > [!IMPORTANT]
-> Using `password_vault = "pass"` without `key_grip`, gvfs.yazi won't be able to save passwords to the password store.
-> GPG Keygrip IS NOT secret and does not need to be kept private.
+> Using `password_vault = "pass"` without `key_grip`, gvfs.yazi won't be able to save passwords to the password store.  
+> GPG Keygrip IS NOT secret and does not need to be kept private.  
 > So you can share your config file without worrying about leaking your passwords.
 
-Now you can use gvfs.yazi and save passwords to the password store.
+Now you can use gvfs.yazi and save passwords to the password store.  
 To increase the time gpg-agent cache the passwords: https://wiki.archlinux.org/title/GnuPG#Cache_passwords
 
 > [!IMPORTANT]

@@ -199,8 +199,8 @@ prepend_keymap = [
 ]
 ```
 
-It's highly recommended to add these lines to your `~/.config/yazi/yazi.toml`,
-because GVFS is slow that can make yazi freeze when it preloads or previews a large number of files.
+It's highly recommended to add these lines to your `~/.config/yazi/yazi.toml`,  
+because GVFS is slow that can make yazi freeze when it preloads or previews a large number of files.  
 Especially when you use `Google-drive` or `One-drive`.
 
 - Replace `1000` with your real user id (run `id -u` to get user id).
@@ -238,7 +238,8 @@ prepend_previewers = [
 
 ## Note for mounting using fstab
 
-If you are using fstab to mount, you need to add `x-gvfs-show` to the mount options. And with it you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
+If you are using fstab to mount, you need to add `x-gvfs-show` to the mount options.  
+And with it you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
 
 - Example `/etc/fstab`:
   - Mount on demand (manually mount):
@@ -276,4 +277,5 @@ If you are using fstab to mount, you need to add `x-gvfs-show` to the mount opti
 
 ## Troubleshooting
 
-- If you have any problems with one of the protocols, please manually mount with `gio mount Scheme/Mount URI`. [List of supported schemes](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>). Then create an issue ticket with the output of `gio mount -li` and list of the mount points under `/run/user/1000/gvfs/XYZ` and `/run/media/USERNAME`
+If you have any problems with one of the protocols, please manually mount with `gio mount Scheme/Mount URI`. [List of supported schemes](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).  
+Then create an issue ticket with the output of `gio mount -li` and list of the mount points under `/run/user/1000/gvfs/XYZ` and `/run/media/USERNAME`

@@ -26,7 +26,8 @@
 sudo loginctl enable-linger $(whoami)
 ```
 
-Ensure that `UsePAM yes` is set in `/etc/ssh/sshd_config` file. The Pluggable Authentication Modules (PAM) system, specifically pam_systemd, is responsible for creating a proper user session on login, which includes setting up the D-Bus session environment.
+Ensure that `UsePAM yes` is set in `/etc/ssh/sshd_config` file.  
+The Pluggable Authentication Modules (PAM) system, specifically pam_systemd, is responsible for creating a proper user session on login, which includes setting up the D-Bus session environment.
 
 ### Step 3: (Optional) Add custom polkit rule to fix permission denied error when mounting a hardware device (Hard disk/drive, etc)
 

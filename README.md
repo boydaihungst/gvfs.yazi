@@ -68,8 +68,8 @@ https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
    # Ubuntu
    sudo apt install gvfs libglib2.0-dev
 
-   # Fedora (Not tested, please report if it works)
-   sudo dnf install gvfs glib2-devel
+   # Fedora
+   sudo dnf install gvfs gvfs-fuse
 
    # Arch
    sudo pacman -S gvfs glib2
@@ -82,8 +82,8 @@ https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
    # This included all protocols
    sudo apt install gvfs-backends gvfs-libs
 
-   # Fedora (Not tested, please report if it works)
-   sudo dnf install gvfs-mtp gvfs-archive gvfs-goa gvfs-gphoto2 gvfs-smb gvfs-afc gvfs-dnssd
+   # Fedora
+   sudo dnf install gvfs-afc gvfs-afp gvfs-archive gvfs-goa gvfs-gphoto2 gvfs-mtp gvfs-nfs gvfs-smb
 
    # Arch
    sudo pacman -S gvfs-mtp gvfs-afc gvfs-google gvfs-gphoto2 gvfs-nfs gvfs-smb gvfs-afc gvfs-dnssd gvfs-goa gvfs-onedrive gvfs-wsdd

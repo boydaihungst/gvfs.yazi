@@ -953,6 +953,18 @@ local function parse_devices(raw_input)
 	---@type Mount?
 	local current_mount = nil
 
+	for m = #predefined_mounts, 1, -1 do
+		local pm = predefined_mounts[m]
+		if pm.scheme == SCHEME.SSH then
+			pm.scheme = SCHEME.SFTP
+			-- Replace ssh:// with sftp:// and remove sub folder
+			pm.uri = pm.uri:gsub("^ssh://", "sftp://"):gsub("^(%a+://[^/]+).*", "%1")
+		elseif pm.scheme == SCHEME.SFTP then
+			-- Remove sub folder
+			pm.uri = pm.uri:gsub("^(%a+://[^/]+).*", "%1")
+		end
+	end
+
 	for line in raw_input:gmatch("[^\r\n]+") do
 		local clean_line = line:match("^%s*(.-)%s*$")
 

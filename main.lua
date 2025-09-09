@@ -66,6 +66,7 @@ local SCHEME = {
 	MTP = "mtp",
 	SMB = "smb",
 	SFTP = "sftp",
+	SSH = "ssh", -- Alias for sftp
 	NFS = "nfs",
 	GPHOTO2 = "gphoto2",
 	FTP = "ftp",

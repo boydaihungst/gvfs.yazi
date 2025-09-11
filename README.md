@@ -12,7 +12,7 @@
 
 <!-- tocstop -->
 
-[gvfs.yazi](https://github.com/boydaihungst/gvfs.yazi) uses [gvfs](https://wiki.gnome.org/Projects/gvfs) and [gio from glib](https://github.com/GNOME/glib) to transparently mount and unmount devices in read and write mode,
+[gvfs.yazi](https://github.com/boydaihungst/gvfs.yazi) uses [gvfs](https://wiki.gnome.org/Projects/gvfs) and [gio from glib](https://github.com/GNOME/glib) to transparently mount and unmount devices or remote storage in read and write mode,
 allowing you to navigate inside, view, and edit individual or groups of files and folders.
 
 Supported protocols: MTP, Hard disk/drive, SMB, SFTP, NFS, GPhoto2 (PTP), FTP, Google Drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), One drive (via [GOA](./GNOME_ONLINE_ACCOUNTS_GOA.md)), DNS-SD, DAV (WebDAV), AFP, AFC. You need to install corresponding packages to use them.
@@ -33,12 +33,12 @@ https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
 
 ## Features
 
-- Support all gvfs schemes/protocols (mtp, smb, ftp, sftp, nfs, gphoto2, afp, afc, sshfs, dav, davs, dav+sd, davs+sd, dns-sd)
-- Mount hardware device or saved scheme/mount URI (use `--mount`)
-- Can unmount and eject hardware device (use `--eject`)
-- Auto jump to a device or saved scheme/mount URI mounted location after successfully mounted (use `--jump`)
+- Supports all gvfs schemes/protocols (mtp, smb, ftp, sftp, nfs, gphoto2, afp, afc, sshfs, dav, davs, dav+sd, davs+sd, dns-sd)
+- Mount hardware device or saved scheme/mount URI (use `--select-then-mount`)
+- Auto-jump to mounted location after mount (use `select-then-mount --jump`)
+- Unmount and eject hardware devices (use `select-then-unmount --eject`)
 - Auto select the first device or saved scheme/mount URI if there is only one listed.
-- Jump to device or saved scheme/mount URI's mounted location (use `jump-to-device` action)
+- Jump to mounted location (use `jump-to-device`)
 - After jumped to mounted location, jump back to the previous location
   with a single keybind. Make it easier to copy/paste files. (use `jump-back-prev-cwd`)
 - Add/Edit/Remove scheme/mount URI (use `add-mount`, `edit-mount`, `remove-mount`). Check this for schemes/mount URI format: [schemes.html](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>)
@@ -98,7 +98,7 @@ require("gvfs"):setup({
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
-  -- (Optional) input box position.
+  -- (Optional) Input box position.
   -- Default: { "top-center", y = 3, w = 60 },
   -- Position, which is a table:
   -- 	`1`: Origin position, available values: "top-left", "top-center", "top-right",
@@ -119,12 +119,13 @@ require("gvfs"):setup({
   -- Read the guide at SECURE_SAVED_PASSWORD.md to get your key_grip
   key_grip = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 
-  -- (Optional) auto save password after mounted.
+  -- (Optional) Auto-save password after mount.
   -- Default: false
   save_password_autoconfirm = true,
   -- (Optional) mountpoint of gvfs. Default: /run/user/USER_ID/gvfs
   -- On some system it could be ~/.gvfs
-  -- You can't decide this path, it will be created automatically, Only changed if you know where gvfs mountpoint is.
+  -- You can't decide this path, it will be created automatically. Only changed if you know where gvfs mountpoint is.
+  -- Use command `ps aux | grep gvfs` to search for gvfs process and get the mountpoint path.
   -- root_mountpoint = (os.getenv("XDG_RUNTIME_DIR") or ("/run/user/" .. ya.uid())) .. "/gvfs"
 })
 ```
@@ -133,14 +134,14 @@ require("gvfs"):setup({
 
 > [!NOTE]
 >
-> - Put files in Trash bin won't work on some protocols (Android MTP), use permanently delete instead.
+> - Moving files to the Trash bin does not work with some protocols (e.g., Android MTP). Please use permanent delete instead.
 > - Scheme/Mount URIs shouldn't contain password, because they are saved as plain text in `yazi/config/gvfs.private`.
 > - Google Drive, One drive are created via GNOME Online Accounts (GOA).
 >   Guide to setup [GNOME_ONLINE_ACCOUNTS_GOA.md](./GNOME_ONLINE_ACCOUNTS_GOA.md)
 > - MTP, GPhoto2, AFC, Hard disk/drive, fstab with x-gvfs-show mount option, Google Drive + One drive protocols are listed automatically. So you don't need to add them via `add-mount` command.
 >   For other protocols (smb, ftp, sftp, etc), use `add-mount` command to add [Schemes/Mount URI](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).
-> - There is a bug with yazi, which prevent mounted folders from refreshing after unmounted.
->   If you encounter this issue, try create new tab, or move cursor up and down a little bit for yazi to refresh.
+> - There is a bug in Yazi that prevents mounted folders from refreshing after they are mounted/unmounted.
+>   If you encounter this issue, try opening a new tab or moving the cursor up and down to trigger a refresh.
 
 Add this to your `~/.config/yazi/keymap.toml`:
 
@@ -159,7 +160,7 @@ prepend_keymap = [
     { on = [ "M", "R" ], run = "plugin gvfs -- remount-current-cwd-device", desc = "Remount device under cwd" },
 
     { on = [ "M", "u" ], run = "plugin gvfs -- select-then-unmount", desc = "Select device then unmount" },
-    # or this if you want to unmount and eject device.
+    # Or this if you want to unmount and eject device.
     #   -> Ejected device can safely be removed.
     #   -> Ejecting a device will unmount all paritions/volumes under it.
     #   -> Fallback to normal unmount if not supported by device.
@@ -173,14 +174,14 @@ prepend_keymap = [
     #   -> Available schemes: mtp, gphoto2, smb, sftp, ftp, nfs, dns-sd, dav, davs, dav+sd, davs+sd, afp, afc, sshfs
     #   -> Read more about the schemes here: https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html
     #   -> Explain about the scheme:
-    #       -> If it show like this: {ftp,ftps,ftpis}://[user@]host[:port]
-    #       -> Every value within [] are optional; for value within {} you need to choose only one of them; The rest are required.
+    #       -> If it shows like this: {ftp,ftps,ftpis}://[user@]host[:port]
+    #       -> Every value within [] is optional. For values within {}, you must choose exactly one. All others are required.
     #       -> Example: {ftp,ftps,ftpis}://[user@]host[:port] => ip and port: "ftp://myusername@192.168.1.2:9999" or domain: "ftps://myusername@github.com"
     #       -> More examples: smb://user@192.168.1.2/share, smb://WORKGROUP;user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
-    # !WARNING: - Scheme/Mount URIs shouldn't contain password.
+    # !WARNING: - Scheme/Mount URI shouldn't contain password.
     #           - Google Drive, One drive are listed automatically via GNOME Online Accounts (GOA). Avoid adding them.
     #           - MTP, GPhoto2, AFC, Hard disk/drive, fstab with x-gvfs-show are listed automatically. Avoid adding them.
-    #           - ssh:// is alias for sftp://. Both don't support [/share]. Everything still work if you accidentally add it.
+    #           - ssh:// is alias for sftp://. Both don't support [/share]. Everything will still work if you accidentally add it.
     #             -> {sftp,ssh}://[user@]host[:port]. Host can be Host alias in .ssh/config file, ip or domain.
     #             -> For example (home is Host alias in .ssh/config file: Host home):
     #                  -> ssh://user_name@home/home/user_name -> this won't mount subfolder /home/user_name, but the root path /
@@ -231,7 +232,8 @@ prepend_previewers = [
   # Allow to preview folder.
   { name = "*/", run = "folder" },
 
-  # Do not previewing files in mounted locations (uncomment this line to except text file):
+  # Do not previewing files in mounted locations.
+  # Uncomment the line below to allow previewing text files.
   # { mime = "{text/*,application/x-subrip}", run = "code" },
 
   # Using absolute path.
@@ -269,19 +271,14 @@ And with it you can only use `jump-to-device` and `jump-back-prev-cwd` actions.
   ```
 
   If you changed mount options (like uid=, gid=, umask=, exfat, ntfs, etc.), already-mounted filesystems won't update unless you unmount and remount them.
-  You can manually remount a specific entry using:
+  You can manually remount a specific entry with these commands:
 
   ```sh
   sudo umount /mnt/myshare
-  ```
-
-  And then:
-
-  ```sh
   sudo mount -a
   ```
 
 ## Troubleshooting
 
-If you have any problems with one of the protocols, please manually mount with `gio mount Scheme/Mount URI`. [List of supported schemes](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).  
-Then create an issue ticket with the output of `gio mount -li` and list of the mount points under `/run/user/1000/gvfs/XYZ` and `/run/media/USERNAME`
+If you have any problems with one of the protocols, please manually mount it using `gio mount Scheme/Mount URI`. See the [list of supported schemes](<https://wiki.gnome.org/Projects(2f)gvfs(2f)schemes.html>).  
+Then create an issue ticket and include the output of `gio mount -li` along with the list of mount points under `/run/user/1000/gvfs/` and `/run/media/USERNAME`

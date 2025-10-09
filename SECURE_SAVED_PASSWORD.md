@@ -172,3 +172,11 @@ pass rm -r gvfs -f
 # Reset unlock state of GPG key
 gpgconf --kill gpg-agent
 ```
+
+- Fix missing public key
+  - If you copied `.gnupg` folder to another computer, you need to re-initialize the GPG key.
+
+    ```bash
+    echo <KEY_ID> > ~/.password-store/.gpg-id
+    pass init <KEY_ID>
+    ```

@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 >
 > - This is need for google-drive and onedrive to work.
-> - Need keyring (gnome-keyring or kwallet). Check [SECURE_SAVED_PASSWORD.md](./SECURE_SAVED_PASSWORD.md) for more information.
+> - Need keyring to be installed (gnome-keyring or kwallet, doesn't need to set `password_vault = "keyring"`). Check [SECURE_SAVED_PASSWORD.md](./SECURE_SAVED_PASSWORD.md) for more information.
 > - Because GOA need to open browser to login to your google-drive or onedrive account.
 >   So this only works on GUI session. Headless session will not work.
 > - Google-drive should work fine now.

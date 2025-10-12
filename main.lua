@@ -100,6 +100,7 @@ local STATE_KEY = {
 	INPUT_POSITION = "INPUT_POSITION",
 	TASKS_LOAD_GDRIVE_FOLDER = "TASKS_LOAD_GDRIVE_FOLDER",
 	TASKS_LOAD_GDRIVE_FOLDER_RUNNING = "TASKS_LOAD_GDRIVE_FOLDER_RUNNING",
+	BLACKLIST_DEVICES = "BLACKLIST_DEVICES",
 }
 
 ---@enum ACTION
@@ -975,6 +976,7 @@ local function parse_devices(raw_input)
 	local volumes = {}
 	local mounts = {}
 	local predefined_mounts = tbl_deep_clone(get_state(STATE_KEY.MOUNTS)) or {}
+	local blacklist_devices = get_state(STATE_KEY.BLACKLIST_DEVICES) or {}
 	---@type Device?
 	local current_volume = nil
 	---@type Mount?
@@ -1119,7 +1121,7 @@ local function parse_devices(raw_input)
 			end
 		end
 		-- NOTE: Remove volumes without scheme (fstab)
-		if not v.scheme then
+		if volumes[i] and not v.scheme then
 			table.remove(volumes, i)
 		end
 
@@ -1142,6 +1144,24 @@ local function parse_devices(raw_input)
 	for _, m in ipairs(predefined_mounts) do
 		m.mounts = { tbl_deep_clone(m) }
 		table.insert(volumes, m)
+	end
+	if #blacklist_devices > 0 then
+		for i = #volumes, 1, -1 do
+			local v = volumes[i]
+			for _, bl_device in pairs(blacklist_devices) do
+				if type(bl_device) == "string" and v.name == bl_device then
+					table.remove(volumes, i)
+				elseif type(bl_device) == "table" then
+					for bl_device_prop, bl_device_value in pairs(bl_device) do
+						if v[bl_device_prop] ~= bl_device_value then
+							goto skip_bl_device
+						end
+					end
+					table.remove(volumes, i)
+				end
+				::skip_bl_device::
+			end
+		end
 	end
 	return volumes
 end
@@ -2111,6 +2131,10 @@ function M:setup(opts)
 	else
 		set_state(STATE_KEY.ROOT_MOUNTPOINT, GVFS_ROOT_MOUNTPOINT)
 	end
+	set_state(
+		STATE_KEY.BLACKLIST_DEVICES,
+		(opts and opts.blacklist_devices and type(opts.blacklist_devices) == "table") and opts.blacklist_devices or {}
+	)
 	set_state(STATE_KEY.MOUNTS, read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH)))
 
 	ps.sub(PUBSUB_KIND.cd, function()

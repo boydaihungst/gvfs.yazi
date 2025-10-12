@@ -94,6 +94,11 @@ require("gvfs"):setup({
   -- (Optional) Allowed keys to select device.
   which_keys = "1234567890qwertyuiopasdfghjklzxcvbnm-=[]\\;',./!@#$%^&*()_+{}|:\"<>?",
 
+  -- (Optional) Table of blacklisted devices.
+  -- List of device properties to match, or a string to match the device name:
+  -- https://github.com/boydaihungst/gvfs.yazi/blob/master/main.lua#L144
+	blacklist_devices = { { name = "Wireless Device", scheme = "mtp" }, { scheme = "file" }, "Device Name"},
+
   -- (Optional) Save file.
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",

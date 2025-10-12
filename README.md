@@ -94,7 +94,7 @@ require("gvfs"):setup({
   -- (Optional) Allowed keys to select device.
   which_keys = "1234567890qwertyuiopasdfghjklzxcvbnm-=[]\\;',./!@#$%^&*()_+{}|:\"<>?",
 
-  -- (Optional) Table of blacklisted devices.
+  -- (Optional) Table of blacklisted devices. These devices will be ignored in any actions
   -- List of device properties to match, or a string to match the device name:
   -- https://github.com/boydaihungst/gvfs.yazi/blob/master/main.lua#L144
 	blacklist_devices = { { name = "Wireless Device", scheme = "mtp" }, { scheme = "file" }, "Device Name"},

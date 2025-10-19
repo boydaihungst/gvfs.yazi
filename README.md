@@ -221,8 +221,8 @@ prepend_keymap = [
     #   -> Works with any command or any bookmark plugin that change cwd. For example, use `yamb` to add bookmarks and jump to them:
 
     #   -> { on = [ "m", "a" ], run = [ "plugin yamb -- save", "plugin gvfs -- automount-when-cd" ], desc = "Add bookmark and enable automount when cd"}
-    { on = [ "M", "t" ], run = "plugin gvfs -- automount-when-cd", desc = "Enable automount when cd for device under cwd" },
-    { on = [ "M", "T" ], run = "plugin gvfs -- automount-when-cd --disabled", desc = "Disable automount when cd for device under cwd" },
+    { on = [ "M", "t" ], run = "plugin gvfs -- automount-when-cd", desc = "Enable automount when cd to device under cwd" },
+    { on = [ "M", "T" ], run = "plugin gvfs -- automount-when-cd --disabled", desc = "Disable automount when cd to device under cwd" },
 ]
 ```
 

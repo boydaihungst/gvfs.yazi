@@ -103,6 +103,10 @@ require("gvfs"):setup({
   -- Default: ~/.config/yazi/gvfs.private
   save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private",
 
+  -- (Optional) Save file for automount devices. Use with `automount-when-cd` action.
+  -- Default: ~/.config/yazi/gvfs_automounts.private
+  save_path_automounts = os.getenv("HOME") .. "/.config/yazi/gvfs_automounts.private",
+
   -- (Optional) Input box position.
   -- Default: { "top-center", y = 3, w = 60 },
   -- Position, which is a table:
@@ -210,6 +214,15 @@ prepend_keymap = [
     # Otherwise it won't show up in the jump list.
     { on = [ "g", "m" ], run = "plugin gvfs -- jump-to-device --automount", desc = "Automount then select device to jump to its mount point" },
     { on = [ "`", "`" ], run = "plugin gvfs -- jump-back-prev-cwd", desc = "Jump back to the position before jumped to device" },
+
+    # Automount
+    #   -> Hover over any file/folder under a mounted device then run `automount-when-cd` action to enable automount when cd/jump for that device.
+    #   -> When you cd/jump to unmounted device mountpoint or its sub folder, this will auto-mount the device before jump.
+    #   -> Works with any command or any bookmark plugin that change cwd. For example, use `yamb` to add bookmarks and jump to them:
+
+    #   -> { on = [ "m", "a" ], run = [ "plugin yamb -- save", "plugin gvfs -- automount-when-cd" ], desc = "Add bookmark and enable automount when cd"}
+    { on = [ "M", "t" ], run = "plugin gvfs -- automount-when-cd", desc = "Enable automount when cd for device under cwd" },
+    { on = [ "M", "T" ], run = "plugin gvfs -- automount-when-cd --disabled", desc = "Disable automount when cd for device under cwd" },
 ]
 ```
 

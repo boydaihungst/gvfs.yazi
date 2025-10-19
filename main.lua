@@ -24,6 +24,7 @@ local NOTIFY_MSG = {
 	MOUNT_SUCCESS = 'Mounted: "%s"',
 	MOUNT_ERROR = "Mount error: %s",
 	CANT_REMOUNT_DEVICE = "This device can't be remounted or already mounted: %s",
+	CANT_AUTOMOUNT = "This device can't be automounted: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
 	READING_GVFS_MOUNTED_FOLDER_ERROR = "Reading gvfs mounted folder error: %s",
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
@@ -49,6 +50,7 @@ local NOTIFY_MSG = {
 	SECRET_VAULT_LOCKED = "Secret vault is locked%s",
 	PASS_INIT_GPG_ID = 'Please run "pass init <KEY_ID>" to initialize your GPG key first. \nCheck SECURE_SAVED_PASSWORD.md for the fix',
 	MISSING_PUBLIC_KEY_GPG_KEY = "GPG key is missing public key\nCheck SECURE_SAVED_PASSWORD.md for the fix",
+	AUTOMOUNT_WHEN_CD_STATE = "%s automount when cd for: %s",
 }
 
 ---@enum PASSWORD_VAULT
@@ -94,7 +96,9 @@ local STATE_KEY = {
 	DBUS_SESSION = "DBUS_SESSION",
 	ROOT_MOUNTPOINT = "ROOT_MOUNTPOINT",
 	SAVE_PATH = "SAVE_PATH",
+	SAVE_PATH_AUTOMOUNTS = "SAVE_PATH_AUTOMOUNTS",
 	MOUNTS = "MOUNTS",
+	AUTOMOUNTS = "AUTOMOUNTS",
 	SAVE_PASSWORD_AUTOCONFIRM = "SAVE_PASSWORD_AUTOCONFIRM",
 	PASSWORD_VAULT = "PASSWORD_VAULT",
 	KEY_GRIP = "KEY_GRIP",
@@ -117,6 +121,8 @@ local ACTION = {
 	REMOVE_MOUNT = "remove-mount",
 	LOAD_GDRIVE_FOLDER = "load-gdrive-folder",
 	CACHE_LOCAL_PATH_DEVICE = "cache-local-path-device",
+	AUTOMOUNT_WHEN_CD = "automount-when-cd",
+	MOUNT_THEN_JUMP_SUBFOLDER = "mount-then-jump-subfolder",
 }
 
 ---@class (exact) GdriveMountedFolderAttribute
@@ -383,6 +389,7 @@ local PUBSUB_KIND = {
 	cd = "cd",
 	hover = "hover",
 	mounts_changed = "@" .. PLUGIN_NAME .. "-" .. "mounts-changed",
+	automounts_changed = "@" .. PLUGIN_NAME .. "-" .. "automounts-changed",
 	unmounted = PLUGIN_NAME .. "-" .. "unmounted",
 }
 
@@ -438,6 +445,13 @@ end
 
 local current_hovered_folder_cwd = ya.sync(function()
 	return cx.active.preview.folder and cx.active.preview.folder.cwd
+end)
+
+local get_hovered_path = ya.sync(function()
+	local h = cx.active.current.hovered
+	if h then
+		return tostring(h.url)
+	end
 end)
 
 local function is_secret_vault_available_keyring(unlock_vault_dialog)
@@ -1567,14 +1581,15 @@ local function get_gio_uri_from_local_path(path)
 end
 
 ---@param path string
+---@param state_key STATE_KEY.CACHED_LOCAL_PATH_DEVICE|STATE_KEY.AUTOMOUNTS|string
 ---@param devices Device[]?
 ---@return Device?
-local function get_device_from_local_path(path, devices)
+local function get_device_from_local_path(path, state_key, devices)
 	local local_path = path:match("^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT)) .. "/[^/]+")
 		or path:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/[^/]+")
 	-- NOTE: Get cached gio uri or get it from command "gio info"
 	---@type Device?
-	local cached_device = get_state(STATE_KEY.CACHED_LOCAL_PATH_DEVICE)[local_path]
+	local cached_device = get_state(state_key)[local_path]
 	local device_props_to_compare = {
 		"class",
 		"label",
@@ -1899,8 +1914,12 @@ local function unmount_action(device, eject, force)
 	end
 end
 
-local function remount_keep_cwd_unchanged_action()
-	local cwd = current_dir()
+---@param state_key STATE_KEY.CACHED_LOCAL_PATH_DEVICE|STATE_KEY.AUTOMOUNTS|string
+---@param current_tab_device Device?
+---@param jump_location string?
+---@param tab_id number?
+local function remount_keep_cwd_unchanged_action(state_key, current_tab_device, jump_location, tab_id)
+	local cwd = jump_location or current_dir()
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	if
 		not cwd:match("^" .. is_literal_string(root_mountpoint) .. "(.+)$")
@@ -1910,7 +1929,7 @@ local function remount_keep_cwd_unchanged_action()
 	end
 
 	local devices = list_gvfs_device()
-	local current_tab_device = get_device_from_local_path(cwd, devices)
+	current_tab_device = current_tab_device or get_device_from_local_path(cwd, state_key, devices)
 	if not current_tab_device then
 		info(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 		return
@@ -1922,28 +1941,64 @@ local function remount_keep_cwd_unchanged_action()
 	local tabs = save_tab_hovered()
 	local saved_matched_tabs = {}
 	-- cd to home for all tabs within the device, and then restore the tabs location
-	for _, tab in ipairs(tabs) do
-		local tab_device = get_device_from_local_path(tostring(tab.cwd), devices)
-		if tab_device and tab_device.name == current_tab_device.name then
-			table.insert(saved_matched_tabs, tab)
+	if state_key == STATE_KEY.CACHED_LOCAL_PATH_DEVICE then
+		for _, tab in ipairs(tabs) do
+			local tab_device = get_device_from_local_path(tostring(tab.cwd), state_key, devices)
+			if tab_device and tab_device.name == current_tab_device.name then
+				table.insert(saved_matched_tabs, tab)
+				ya.emit("cd", {
+					root_mountpoint,
+					tab = tab.id,
+					raw = true,
+				})
+			end
+		end
+	end
+	mount_action({ jump = false, device = current_tab_device })
+	if state_key == STATE_KEY.CACHED_LOCAL_PATH_DEVICE then
+		for _, tab in ipairs(saved_matched_tabs) do
 			ya.emit("cd", {
-				root_mountpoint,
+				tostring(tab.cwd),
 				tab = tab.id,
 				raw = true,
 			})
 		end
-	end
-	mount_action({ jump = false, device = current_tab_device })
-	for _, tab in ipairs(saved_matched_tabs) do
-		ya.emit("cd", {
-			tostring(tab.cwd),
-			tab = tab.id,
-			raw = true,
-		})
+	else
+		if jump_location then
+			local jump_location_cha, _ = fs.cha(Url(jump_location))
+			ya.emit((jump_location_cha and jump_location_cha.is_dir) and "cd" or "reveal", {
+				tostring(jump_location),
+				no_dummy = true,
+				raw = true,
+				tab = tab_id,
+			})
+		end
 	end
 end
 
----comment
+local save_automount_devices = function()
+	local automounts = get_state(STATE_KEY.AUTOMOUNTS)
+
+	local save_path = Url(get_state(STATE_KEY.SAVE_PATH_AUTOMOUNTS))
+	-- create parent directories
+	local save_path_created, err_create = fs.create("dir_all", save_path.parent)
+
+	if err_create then
+		error(NOTIFY_MSG.CANT_CREATE_SAVE_FOLDER, tostring(save_path.parent))
+	end
+
+	-- save mounts to file
+	if save_path_created then
+		local _, err_write = fs.write(save_path, ya.json_encode(hex_encode_table(automounts)))
+		if err_write then
+			error(NOTIFY_MSG.CANT_SAVE_DEVICES, tostring(save_path))
+		end
+	end
+
+	-- trigger update to other instances
+	broadcast(PUBSUB_KIND.automounts_changed, hex_encode_table(automounts))
+end
+
 local save_mounts = function()
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	local mounts_to_save = {}
@@ -1979,7 +2034,7 @@ local save_mounts = function()
 	broadcast(PUBSUB_KIND.mounts_changed, hex_encode_table(mounts))
 end
 
-local read_mounts_from_saved_file = function(save_path)
+local read_hex_decoded_file_content = function(save_path)
 	local file = io.open(save_path, "r")
 	if file == nil then
 		return {}
@@ -2134,12 +2189,35 @@ local function load_gdrive_folder_action()
 end
 
 local function cache_local_path_device_action(local_path)
-	local device_matched = get_device_from_local_path(local_path)
+	local device_matched = get_device_from_local_path(local_path, STATE_KEY.CACHED_LOCAL_PATH_DEVICE)
 	if device_matched then
 		set_state_table(STATE_KEY.CACHED_LOCAL_PATH_DEVICE, local_path, device_matched)
 	end
 end
 
+---@param enabled boolean?
+local function toggle_automount_when_cd_action(enabled)
+	local hovered_path = get_hovered_path()
+	local local_path = hovered_path:match("^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT)) .. "/[^/]+")
+		or hovered_path:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/[^/]+")
+	if local_path then
+		if not enabled then
+			set_state_table(STATE_KEY.AUTOMOUNTS, local_path, nil)
+		else
+			local device_matched = get_device_from_local_path(local_path, STATE_KEY.AUTOMOUNTS)
+			if device_matched then
+				if device_matched.can_mount == "0" then
+					info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
+					return
+				end
+
+				set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device_matched)
+			end
+		end
+		info(NOTIFY_MSG.AUTOMOUNT_WHEN_CD_STATE, enabled and "Enabled" or "Disabled", tostring(local_path))
+		save_automount_devices()
+	end
+end
 local function remove_mount_action()
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	if #mounts == 0 then
@@ -2207,13 +2285,17 @@ function M:setup(opts)
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then
 		st[STATE_KEY.WHICH_KEYS] = opts.which_keys
 	end
-	local save_path = (ya.target_family() == "windows" and os.getenv("APPDATA") .. "\\yazi\\config\\gvfs.private")
-		or (os.getenv("HOME") .. "/.config/yazi/gvfs.private")
+	local save_path = os.getenv("HOME") .. "/.config/yazi/gvfs.private"
 	if type(opts) == "table" then
 		save_path = opts.save_path or save_path
 	end
 
+	local save_path_automounts = os.getenv("HOME") .. "/.config/yazi/gvfs_automounts.private"
+	if type(opts) == "table" then
+		save_path_automounts = opts.save_path_automounts or save_path_automounts
+	end
 	st[STATE_KEY.SAVE_PATH] = save_path
+	st[STATE_KEY.SAVE_PATH_AUTOMOUNTS] = save_path_automounts
 
 	-- NOTE: Use pathJoin to avoid double slashes and end with a slash
 	if opts and opts.root_mountpoint and type(opts.root_mountpoint) == "string" then
@@ -2225,11 +2307,12 @@ function M:setup(opts)
 			and opts.blacklist_devices
 		or {}
 
-	st[STATE_KEY.MOUNTS] = read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH))
+	st[STATE_KEY.MOUNTS] = read_hex_decoded_file_content(get_state(STATE_KEY.SAVE_PATH))
+	st[STATE_KEY.AUTOMOUNTS] = read_hex_decoded_file_content(get_state(STATE_KEY.SAVE_PATH_AUTOMOUNTS)) or {}
 
 	st[STATE_KEY.CACHED_LOCAL_PATH_DEVICE] = {}
 
-	ps.sub(PUBSUB_KIND.cd, function()
+	ps.sub(PUBSUB_KIND.cd, function(payload)
 		local cwd = cx.active.current.cwd
 		if not cwd then
 			return
@@ -2254,6 +2337,20 @@ function M:setup(opts)
 		if local_path then
 			if not st[STATE_KEY.CACHED_LOCAL_PATH_DEVICE][local_path] then
 				local args = ya.quote(ACTION.CACHE_LOCAL_PATH_DEVICE) .. " " .. ya.quote(local_path)
+				ya.emit("plugin", {
+					self._id,
+					args,
+				})
+			end
+			if st[STATE_KEY.AUTOMOUNTS][local_path] and not st[STATE_KEY.AUTOMOUNTS][local_path].locked_automount then
+				st[STATE_KEY.AUTOMOUNTS][local_path].locked_automount = true
+				local args = ya.quote(ACTION.MOUNT_THEN_JUMP_SUBFOLDER)
+					.. " "
+					.. ya.quote(cwd_raw)
+					.. " "
+					.. ya.quote(local_path)
+					.. " "
+					.. ya.quote(payload.tab)
 				ya.emit("plugin", {
 					self._id,
 					args,
@@ -2284,12 +2381,17 @@ function M:setup(opts)
 	ps.sub_remote(PUBSUB_KIND.mounts_changed, function(mounts)
 		set_state(STATE_KEY.MOUNTS, hex_decode_table(mounts))
 	end)
+
+	ps.sub_remote(PUBSUB_KIND.automounts_changed, function(automounts)
+		set_state(STATE_KEY.AUTOMOUNTS, hex_decode_table(automounts))
+	end)
+
 	ps.sub_remote(PUBSUB_KIND.unmounted, function(unmounted_url)
 		redirect_unmounted_tab_to_home(hex_decode(unmounted_url))
 	end)
 end
 
----@param job {args: string[], args: {jump: boolean?, eject: boolean?, force: boolean?, automount: boolean?}}
+---@param job {args: unknown[], args: {jump: boolean?, eject: boolean?, force: boolean?, automount: boolean?, disabled: boolean?}}
 function M:entry(job)
 	if not is_cmd_exist("gio") then
 		error(NOTIFY_MSG.CMD_NOT_FOUND, "gio")
@@ -2323,7 +2425,7 @@ function M:entry(job)
 		unmount_action(nil, eject, force)
 		-- remount device within current cwd
 	elseif action == ACTION.REMOUNT_KEEP_CWD_UNCHANGED then
-		remount_keep_cwd_unchanged_action()
+		remount_keep_cwd_unchanged_action(STATE_KEY.CACHED_LOCAL_PATH_DEVICE)
 		-- select a device then go to its mounted point
 	elseif action == ACTION.JUMP_TO_DEVICE then
 		local automount = job.args.automount or false
@@ -2336,11 +2438,32 @@ function M:entry(job)
 		add_or_edit_mount_action(true)
 	elseif action == ACTION.REMOVE_MOUNT then
 		remove_mount_action()
+	elseif action == ACTION.AUTOMOUNT_WHEN_CD then
+		local enabled = not job.args.disabled
+		toggle_automount_when_cd_action(enabled)
+
+	-- NOTE: Switch to new async when it's merged to yazi nightly
 	elseif action == ACTION.LOAD_GDRIVE_FOLDER then
 		load_gdrive_folder_action()
 	elseif action == ACTION.CACHE_LOCAL_PATH_DEVICE then
 		local local_path = job.args[2]
-		cache_local_path_device_action(local_path)
+		if fs.cha(Url(local_path)) then
+			cache_local_path_device_action(local_path)
+		end
+	elseif action == ACTION.MOUNT_THEN_JUMP_SUBFOLDER then
+		local subfolder_path = job.args[2]
+		local local_path = job.args[3]
+		local tab_id = job.args[4]
+		local local_path_cha, _ = fs.cha(Url(local_path))
+		if local_path_cha and local_path_cha.is_dir then
+			return
+		end
+		local device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
+		if device then
+			remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, device, subfolder_path, tab_id)
+		end
+		device.locked_automount = false
+		set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device)
 	end
 	-- TODO: remove this after next yazi released
 	(ui.render or ya.render)()

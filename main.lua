@@ -23,7 +23,7 @@ local NOTIFY_MSG = {
 	CMD_NOT_FOUND = 'Command "%s" not found. Make sure it is installed.',
 	MOUNT_SUCCESS = 'Mounted: "%s"',
 	MOUNT_ERROR = "Mount error: %s",
-	CANT_MOUNT_DEVICE = "This device can't be mounted or already mounted: %s",
+	CANT_REMOUNT_DEVICE = "This device can't be remounted or already mounted: %s",
 	UNMOUNT_ERROR = "Unmount error: %s",
 	READING_GVFS_MOUNTED_FOLDER_ERROR = "Reading gvfs mounted folder error: %s",
 	UNMOUNT_SUCCESS = 'Unmounted: "%s"',
@@ -85,6 +85,7 @@ local SCHEME = {
 	AFC = "afc",
 	FILE = "file",
 }
+
 ---@enum STATE_KEY
 local STATE_KEY = {
 	PREV_CWD = "PREV_CWD",
@@ -101,6 +102,7 @@ local STATE_KEY = {
 	TASKS_LOAD_GDRIVE_FOLDER = "TASKS_LOAD_GDRIVE_FOLDER",
 	TASKS_LOAD_GDRIVE_FOLDER_RUNNING = "TASKS_LOAD_GDRIVE_FOLDER_RUNNING",
 	BLACKLIST_DEVICES = "BLACKLIST_DEVICES",
+	CACHED_LOCAL_PATH_DEVICE = "CACHED_LOCAL_PATH_DEVICE",
 }
 
 ---@enum ACTION
@@ -114,6 +116,7 @@ local ACTION = {
 	EDIT_MOUNT = "edit-mount",
 	REMOVE_MOUNT = "remove-mount",
 	LOAD_GDRIVE_FOLDER = "load-gdrive-folder",
+	CACHE_LOCAL_PATH_DEVICE = "cache-local-path-device",
 }
 
 ---@class (exact) GdriveMountedFolderAttribute
@@ -225,6 +228,14 @@ local function hex_decode_table(t)
 	return out
 end
 
+local set_state_table = ya.sync(function(state, table, key, value)
+	if type(table) == "string" and type(key) == "string" then
+		if not state[table] then
+			state[table] = {}
+		end
+		state[table][key] = value
+	end
+end)
 local set_state = ya.sync(function(state, key, value)
 	state[key] = value
 end)
@@ -1526,9 +1537,8 @@ local function select_device_which_key(devices)
 end
 
 ---@param path string
----@param devices Device[]
----@return Device?
-local function get_device_from_local_path(path, devices)
+---@return string?
+local function get_gio_uri_from_local_path(path)
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	if
 		not path:match("^" .. is_literal_string(root_mountpoint) .. "(.+)$")
@@ -1545,7 +1555,7 @@ local function get_device_from_local_path(path, devices)
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
-	if err or (path_info and path_info.status and not path_info.status.success) then
+	if not path_info or err or (path_info and path_info.status and not path_info.status.success) then
 		return nil
 	end
 	local path_uri = path_info.stdout:match("^uri: (.+)$"):gsub("\n", "")
@@ -1553,18 +1563,82 @@ local function get_device_from_local_path(path, devices)
 		return nil
 	end
 
-	if not devices then
-		devices = list_gvfs_device()
-	end
-	for _, device in ipairs(devices) do
-		if device.uri and path_uri:match("^" .. is_literal_string(device.uri) .. ".*") then
-			return device
+	return path_uri
+end
+
+---@param path string
+---@param devices Device[]?
+---@return Device?
+local function get_device_from_local_path(path, devices)
+	local local_path = path:match("^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT)) .. "/[^/]+")
+		or path:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/[^/]+")
+	-- NOTE: Get cached gio uri or get it from command "gio info"
+	---@type Device?
+	local cached_device = get_state(STATE_KEY.CACHED_LOCAL_PATH_DEVICE)[local_path]
+	local device_props_to_compare = {
+		"class",
+		"label",
+		"scheme",
+		"encrypted_uuid",
+		"service_domain",
+		"uri",
+		"remote_path",
+	}
+	local mount_props_to_compare = {
+		"class",
+		"uri",
+		"scheme",
+		"uuid",
+		"remote_path",
+		"name",
+	}
+	if cached_device then
+		if not devices then
+			devices = list_gvfs_device()
 		end
-		for _, mount in ipairs(device.mounts) do
-			if mount.uri and path_uri:match("^" .. is_literal_string(mount.uri) .. ".*") then
-				return device
+		local matched_device = nil
+		for _, device in ipairs(devices) do
+			matched_device = device
+			for _, prop in ipairs(device_props_to_compare) do
+				if cached_device[prop] ~= device[prop] then
+					matched_device = nil
+					goto jump_to_compare_mounts
+				end
+			end
+			if matched_device then
+				return matched_device
+			end
+			::jump_to_compare_mounts::
+			for _, mount in ipairs(device.mounts) do
+				matched_device = device
+				for _, prop in ipairs(mount_props_to_compare) do
+					if cached_device[prop] ~= mount[prop] then
+						matched_device = nil
+						break
+					end
+				end
 			end
 		end
+		return matched_device
+	else
+		local gio_uri = get_gio_uri_from_local_path(path)
+		if not gio_uri then
+			return nil
+		end
+		if not devices then
+			devices = list_gvfs_device()
+		end
+		for _, device in ipairs(devices) do
+			if device.uri and gio_uri:match("^" .. is_literal_string(device.uri) .. ".*") then
+				return device
+			end
+			for _, mount in ipairs(device.mounts) do
+				if mount.uri and gio_uri:match("^" .. is_literal_string(mount.uri) .. ".*") then
+					return device
+				end
+			end
+		end
+		return nil
 	end
 	return nil
 end
@@ -1826,16 +1900,25 @@ local function unmount_action(device, eject, force)
 end
 
 local function remount_keep_cwd_unchanged_action()
+	local cwd = current_dir()
+	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
+	if
+		not cwd:match("^" .. is_literal_string(root_mountpoint) .. "(.+)$")
+		and not cwd:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "(.+)$")
+	then
+		return nil
+	end
+
 	local devices = list_gvfs_device()
-	local current_tab_device = get_device_from_local_path(current_dir(), devices)
+	local current_tab_device = get_device_from_local_path(cwd, devices)
 	if not current_tab_device then
+		info(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 		return
 	end
 	if current_tab_device.can_mount == "0" then
-		info(NOTIFY_MSG.CANT_MOUNT_DEVICE, current_tab_device.name)
+		info(NOTIFY_MSG.CANT_REMOUNT_DEVICE, current_tab_device.name)
 		return
 	end
-	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	local tabs = save_tab_hovered()
 	local saved_matched_tabs = {}
 	-- cd to home for all tabs within the device, and then restore the tabs location
@@ -2050,6 +2133,13 @@ local function load_gdrive_folder_action()
 	load_gdrive_folder_action()
 end
 
+local function cache_local_path_device_action(local_path)
+	local device_matched = get_device_from_local_path(local_path)
+	if device_matched then
+		set_state_table(STATE_KEY.CACHED_LOCAL_PATH_DEVICE, local_path, device_matched)
+	end
+end
+
 local function remove_mount_action()
 	local mounts = get_state(STATE_KEY.MOUNTS)
 	if #mounts == 0 then
@@ -2092,31 +2182,30 @@ end
 ---setup function in yazi/init.lua
 ---@param opts {}
 function M:setup(opts)
+	local st = self
+
 	if opts and opts.key_grip then
-		set_state(STATE_KEY.KEY_GRIP, opts.key_grip)
+		st[STATE_KEY.KEY_GRIP] = opts.key_grip
 	end
-	set_state(
-		STATE_KEY.INPUT_POSITION,
-		opts and type(opts.input_position) == "table" and opts.input_position or { "top-center", y = 3, w = 60 }
-	)
+	st[STATE_KEY.INPUT_POSITION] = (opts and type(opts.input_position) == "table") and opts.input_position
+		or { "top-center", y = 3, w = 60 }
+
 	if opts and opts.save_password_autoconfirm == true then
-		set_state(STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM, true)
+		st[STATE_KEY.SAVE_PASSWORD_AUTOCONFIRM] = true
 	end
 	if opts and opts.password_vault then
-		set_state(
-			STATE_KEY.PASSWORD_VAULT,
-			(opts and (opts.password_vault == PASSWORD_VAULT.KEYRING or opts.password_vault == PASSWORD_VAULT.PASS))
-				and opts.password_vault
-		)
+		st[STATE_KEY.PASSWORD_VAULT] = (
+			opts and (opts.password_vault == PASSWORD_VAULT.KEYRING or opts.password_vault == PASSWORD_VAULT.PASS)
+		) and opts.password_vault
 	else
 		-- TODO: REMOVE: backwards compatibility
 		if opts and opts.enabled_keyring == true then
-			set_state(STATE_KEY.PASSWORD_VAULT, PASSWORD_VAULT.KEYRING)
+			st[STATE_KEY.PASSWORD_VAULT] = PASSWORD_VAULT.KEYRING
 		end
 	end
 
 	if opts and opts.which_keys and type(opts.which_keys) == "string" then
-		set_state(STATE_KEY.WHICH_KEYS, opts.which_keys)
+		st[STATE_KEY.WHICH_KEYS] = opts.which_keys
 	end
 	local save_path = (ya.target_family() == "windows" and os.getenv("APPDATA") .. "\\yazi\\config\\gvfs.private")
 		or (os.getenv("HOME") .. "/.config/yazi/gvfs.private")
@@ -2124,18 +2213,21 @@ function M:setup(opts)
 		save_path = opts.save_path or save_path
 	end
 
-	set_state(STATE_KEY.SAVE_PATH, save_path)
+	st[STATE_KEY.SAVE_PATH] = save_path
 
+	-- NOTE: Use pathJoin to avoid double slashes and end with a slash
 	if opts and opts.root_mountpoint and type(opts.root_mountpoint) == "string" then
-		set_state(STATE_KEY.ROOT_MOUNTPOINT, opts.root_mountpoint)
+		st[STATE_KEY.ROOT_MOUNTPOINT] = pathJoin(opts.root_mountpoint)
 	else
-		set_state(STATE_KEY.ROOT_MOUNTPOINT, GVFS_ROOT_MOUNTPOINT)
+		st[STATE_KEY.ROOT_MOUNTPOINT] = pathJoin(GVFS_ROOT_MOUNTPOINT)
 	end
-	set_state(
-		STATE_KEY.BLACKLIST_DEVICES,
-		(opts and opts.blacklist_devices and type(opts.blacklist_devices) == "table") and opts.blacklist_devices or {}
-	)
-	set_state(STATE_KEY.MOUNTS, read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH)))
+	st[STATE_KEY.BLACKLIST_DEVICES] = (opts and opts.blacklist_devices and type(opts.blacklist_devices) == "table")
+			and opts.blacklist_devices
+		or {}
+
+	st[STATE_KEY.MOUNTS] = read_mounts_from_saved_file(get_state(STATE_KEY.SAVE_PATH))
+
+	st[STATE_KEY.CACHED_LOCAL_PATH_DEVICE] = {}
 
 	ps.sub(PUBSUB_KIND.cd, function()
 		local cwd = cx.active.current.cwd
@@ -2155,6 +2247,18 @@ function M:setup(opts)
 				self._id,
 				args,
 			})
+		end
+		local local_path = cwd_raw:match("^" .. is_literal_string(st[STATE_KEY.ROOT_MOUNTPOINT]) .. "/[^/]+")
+			or cwd_raw:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/[^/]+")
+
+		if local_path then
+			if not st[STATE_KEY.CACHED_LOCAL_PATH_DEVICE][local_path] then
+				local args = ya.quote(ACTION.CACHE_LOCAL_PATH_DEVICE) .. " " .. ya.quote(local_path)
+				ya.emit("plugin", {
+					self._id,
+					args,
+				})
+			end
 		end
 	end)
 
@@ -2234,6 +2338,9 @@ function M:entry(job)
 		remove_mount_action()
 	elseif action == ACTION.LOAD_GDRIVE_FOLDER then
 		load_gdrive_folder_action()
+	elseif action == ACTION.CACHE_LOCAL_PATH_DEVICE then
+		local local_path = job.args[2]
+		cache_local_path_device_action(local_path)
 	end
 	-- TODO: remove this after next yazi released
 	(ui.render or ya.render)()

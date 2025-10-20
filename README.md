@@ -215,10 +215,10 @@ prepend_keymap = [
     { on = [ "g", "m" ], run = "plugin gvfs -- jump-to-device --automount", desc = "Automount then select device to jump to its mount point" },
     { on = [ "`", "`" ], run = "plugin gvfs -- jump-back-prev-cwd", desc = "Jump back to the position before jumped to device" },
 
-    # Automount
+    # Automount (This is different from `x-systemd.automount` in /etc/fstab)
     #   -> Hover over any file/folder under a mounted device then run `automount-when-cd` action to enable automount when cd/jump for that device.
     #   -> When you cd/jump to unmounted device mountpoint or its sub folder, this will auto-mount the device before jump.
-    #   -> Works with any command or any bookmark plugin that change cwd. For example, use `yamb` to add bookmarks and jump to them:
+    #   -> Works with any command or any bookmark plugin that change cwd. For example, use `yamb` to add bookmarks and jump to them, use yazi's built-in `cd` `back` `forward` commands:
 
     #   -> { on = [ "m", "a" ], run = [ "plugin yamb -- save", "plugin gvfs -- automount-when-cd" ], desc = "Add bookmark and enable automount when cd"}
     { on = [ "M", "t" ], run = "plugin gvfs -- automount-when-cd", desc = "Enable automount when cd to device under cwd" },

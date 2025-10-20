@@ -2206,11 +2206,12 @@ local function toggle_automount_when_cd_action(enabled)
 		else
 			local device_matched = get_device_from_local_path(local_path, STATE_KEY.AUTOMOUNTS)
 			if device_matched then
-				if device_matched.can_mount == "0" then
-					info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
-					return
-				end
-
+				-- NOTE: Seem like in some mounted devices this flag is 0
+				-- if device_matched.can_mount == "0" then
+				-- 	info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
+				-- 	return
+				-- end
+				--
 				set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device_matched)
 			end
 		end
@@ -2455,10 +2456,12 @@ function M:entry(job)
 		local local_path = job.args[3]
 		local tab_id = job.args[4]
 		local local_path_cha, _ = fs.cha(Url(local_path))
+		local device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
 		if local_path_cha and local_path_cha.is_dir then
+			device.locked_automount = false
+			set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device)
 			return
 		end
-		local device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
 		if device then
 			remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, device, subfolder_path, tab_id)
 		end

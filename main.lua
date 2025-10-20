@@ -388,8 +388,8 @@ end)
 local PUBSUB_KIND = {
 	cd = "cd",
 	hover = "hover",
-	mounts_changed = "@" .. PLUGIN_NAME .. "-" .. "mounts-changed",
-	automounts_changed = "@" .. PLUGIN_NAME .. "-" .. "automounts-changed",
+	mounts_changed = PLUGIN_NAME .. "-" .. "mounts-changed",
+	automounts_changed = PLUGIN_NAME .. "-" .. "automounts-changed",
 	unmounted = PLUGIN_NAME .. "-" .. "unmounted",
 }
 

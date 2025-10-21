@@ -1934,7 +1934,7 @@ local function remount_keep_cwd_unchanged_action(state_key, current_tab_device, 
 		info(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 		return
 	end
-	if current_tab_device.can_mount == "0" then
+	if is_mounted(current_tab_device) then
 		info(NOTIFY_MSG.CANT_REMOUNT_DEVICE, current_tab_device.name)
 		return
 	end
@@ -2458,6 +2458,7 @@ function M:entry(job)
 		local local_path_cha, _ = fs.cha(Url(local_path))
 		local device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
 		if local_path_cha and local_path_cha.is_dir then
+			-- NOTE: Skip automount
 			device.locked_automount = false
 			set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device)
 			return

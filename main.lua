@@ -1921,10 +1921,9 @@ local function unmount_action(device, eject, force)
 end
 
 ---@param state_key STATE_KEY.CACHED_LOCAL_PATH_DEVICE|STATE_KEY.AUTOMOUNTS|string
----@param current_tab_device Device?
 ---@param jump_location string?
 ---@param tab_id number?
-local function remount_keep_cwd_unchanged_action(state_key, current_tab_device, jump_location, tab_id)
+local function remount_keep_cwd_unchanged_action(state_key, jump_location, tab_id)
 	local cwd = jump_location or current_dir()
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	if
@@ -1935,7 +1934,7 @@ local function remount_keep_cwd_unchanged_action(state_key, current_tab_device, 
 	end
 
 	local devices = list_gvfs_device()
-	current_tab_device = current_tab_device or get_device_from_local_path(cwd, state_key, devices)
+	local current_tab_device = get_device_from_local_path(cwd, state_key, devices)
 	if not current_tab_device then
 		info(NOTIFY_MSG.DEVICE_IS_DISCONNECTED)
 		return
@@ -1980,6 +1979,7 @@ local function remount_keep_cwd_unchanged_action(state_key, current_tab_device, 
 			})
 		end
 	end
+	return current_tab_device
 end
 
 local save_automount_devices = function()
@@ -2461,18 +2461,22 @@ function M:entry(job)
 		local local_path = job.args[3]
 		local tab_id = job.args[4]
 		local local_path_cha, _ = fs.cha(Url(local_path))
-		local device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
+		local cached_device = get_state(STATE_KEY.AUTOMOUNTS)[local_path]
 		if local_path_cha and local_path_cha.is_dir then
 			-- NOTE: Skip automount
-			device.locked_automount = false
-			set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device)
+			cached_device.locked_automount = false
+			set_state_table(STATE_KEY.AUTOMOUNTS, local_path, cached_device)
 			return
 		end
-		if device then
-			remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, device, subfolder_path, tab_id)
+		if cached_device then
+			-- Update cached device with new data
+			local new_cached_device = remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, subfolder_path, tab_id)
+			if new_cached_device then
+				cached_device = new_cached_device
+			end
 		end
-		device.locked_automount = false
-		set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device)
+		cached_device.locked_automount = false
+		set_state_table(STATE_KEY.AUTOMOUNTS, local_path, cached_device)
 	end
 	-- TODO: remove this after next yazi released
 	(ui.render or ya.render)()

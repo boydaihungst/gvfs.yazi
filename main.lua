@@ -1217,14 +1217,20 @@ local function get_mounted_path(device)
 	return nil
 end
 
----@param device Device
-local function is_mounted(device)
+local function can_device_umount(device)
 	if device and device.mounts and #device.mounts > 0 then
 		for _, mount in ipairs(device.mounts) do
 			if mount.can_unmount == "1" or mount.can_eject == "1" then
 				return true
 			end
 		end
+	end
+end
+
+---@param device Device
+local function is_mounted(device)
+	if can_device_umount(device) then
+		return true
 	end
 	local mountpath = get_mounted_path(device)
 	return mountpath and is_folder_exist(mountpath)
@@ -2206,11 +2212,10 @@ local function toggle_automount_when_cd_action(enabled)
 		else
 			local device_matched = get_device_from_local_path(local_path, STATE_KEY.AUTOMOUNTS)
 			if device_matched then
-				-- NOTE: Seem like in some mounted devices this flag is 0
-				-- if device_matched.can_mount == "0" then
-				-- 	info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
-				-- 	return
-				-- end
+				if not can_device_umount(device_matched) then
+					info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
+					return
+				end
 				--
 				set_state_table(STATE_KEY.AUTOMOUNTS, local_path, device_matched)
 			end

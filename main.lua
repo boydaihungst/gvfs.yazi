@@ -2212,7 +2212,7 @@ local function toggle_automount_when_cd_action(enabled)
 		else
 			local device_matched = get_device_from_local_path(local_path, STATE_KEY.AUTOMOUNTS)
 			if device_matched then
-				if not can_device_umount(device_matched) then
+				if device_matched.mounts and #device_matched.mounts > 0 and not can_device_umount(device_matched) then
 					info(NOTIFY_MSG.CANT_AUTOMOUNT, device_matched.name)
 					return
 				end

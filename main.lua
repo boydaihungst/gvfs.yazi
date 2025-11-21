@@ -1338,7 +1338,9 @@ local function mount_device(opts)
 			if stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
 				if retries < max_retry then
 					username, _ = show_input(
-						"Enter username " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+						"Enter username "
+							.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
+							.. ":",
 						false,
 						username or stdout:match("User %[(.*)%]:") or ""
 					)
@@ -1360,7 +1362,9 @@ local function mount_device(opts)
 			then
 				if retries < max_retry then
 					service_domain, _ = show_input(
-						"Enter Domain " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+						"Enter Domain "
+							.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
+							.. ":",
 						false,
 						service_domain or stdout:match("Domain %[(.*)%]:") or "WORKGROUP"
 					)
@@ -1411,7 +1415,9 @@ local function mount_device(opts)
 				if retries < max_retry then
 					if not is_pw_saved then
 						password, _ = show_input(
-							"Enter password " .. (device.uri and "(" .. device.uri .. ")" or "") .. ":",
+							"Enter password "
+								.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
+								.. ":",
 							true
 						)
 						if password == nil then

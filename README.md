@@ -87,7 +87,7 @@ https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
 ya pkg add boydaihungst/gvfs
 ```
 
-Modify your `~/.config/yazi/init.lua` to include (`setup` function are required):
+Modify your `~/.config/yazi/init.lua` to include (`setup` function is required):
 
 ```lua
 require("gvfs"):setup({

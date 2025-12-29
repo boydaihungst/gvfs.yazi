@@ -236,7 +236,7 @@ Especially when you use `Google-drive` or `One-drive`.
 
 > [!IMPORTANT]
 >
-> For yazi nightly replace `name` with `url`
+> For yazi (>=v25.12.29) replace `name` with `url`
 
 ```toml
 [plugin]

@@ -376,12 +376,8 @@ local function tbl_remove_empty(tbl)
 	return cleaned
 end
 
-local get_cwd = ya.sync(function()
-	return cx.active.current.cwd
-end)
-
 local current_dir = ya.sync(function()
-	return tostring(cx.active.current.cwd)
+	return tostring(cx.active.current.cwd.path or cx.active.current.cwd)
 end)
 
 ---@enum PUBSUB_KIND
@@ -443,12 +439,8 @@ local function path_quote(path)
 	return result
 end
 
-local current_hovered_folder_cwd = ya.sync(function()
-	return cx.active.preview.folder and cx.active.preview.folder.cwd
-end)
-
 local get_hovered_path = ya.sync(function()
-	local h = cx.active.current.hovered
+	local h = cx.active.current.hovered.path or cx.active.current.hovered
 	if h then
 		return tostring(h.url)
 	end
@@ -2214,6 +2206,10 @@ end
 ---@param enabled boolean?
 local function toggle_automount_when_cd_action(enabled)
 	local hovered_path = get_hovered_path()
+	local is_virtual = Url(hovered_path).scheme and Url(hovered_path).scheme.is_virtual
+	if is_virtual then
+		return
+	end
 	local local_path = hovered_path:match("^" .. is_literal_string(get_state(STATE_KEY.ROOT_MOUNTPOINT)) .. "/[^/]+")
 		or hovered_path:match("^" .. is_literal_string(GVFS_ROOT_MOUNTPOINT_FILE) .. "/[^/]+")
 	if local_path then

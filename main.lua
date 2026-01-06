@@ -15,6 +15,7 @@ local SECRET_TOOL = "secret-tool"
 local GPG_TOOL = "gpg"
 local PASS_TOOL = "pass"
 local SECRET_VAULT_VERSION = "1"
+local path_separator = package.config:sub(1, 1)
 
 ---@enum NOTIFY_MSG
 local NOTIFY_MSG = {
@@ -949,7 +950,10 @@ local function display_virtual_children(cwd, children_folder_info)
 
 	for _, gdrive_mountpoint_info in ipairs(children_folder_info) do
 		if id ~= nil and id ~= "" then
-			local url = Url(cwd):join(gdrive_mountpoint_info.display_name)
+			-- TODO: WORKAROUND: cwd prefix `search://` can't be joined
+			-- local url = Url(cwd):join(gdrive_mountpoint_info.display_name)
+			local url =
+				Url(tostring(cwd.path or cwd) .. path_separator .. tostring(gdrive_mountpoint_info.display_name))
 
 			local kind = gdrive_mountpoint_info.type == "directory" and 1
 				or (

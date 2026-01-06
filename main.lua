@@ -1814,9 +1814,10 @@ end
 local save_tab_hovered = ya.sync(function()
 	local hovered_item_per_tab = {}
 	for _, tab in ipairs(cx.tabs) do
+		local is_virtual = Url(tab.current.cwd).scheme and Url(tab.current.cwd).scheme.is_virtual
 		table.insert(hovered_item_per_tab, {
 			id = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,
-			cwd = tostring(tab.current.cwd),
+			cwd = tostring(is_virtual and tab.current.cwd or tab.current.cwd.path),
 		})
 	end
 	return hovered_item_per_tab
@@ -1831,7 +1832,8 @@ local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url, notify
 		broadcast(PUBSUB_KIND.unmounted, hex_encode(unmounted_url))
 	end
 	for _, tab in ipairs(cx.tabs) do
-		if tab.current.cwd:starts_with(unmounted_url) then
+		local is_virtual = Url(tab.current.cwd).scheme and Url(tab.current.cwd).scheme.is_virtual
+		if (is_virtual and tab.current.cwd or tab.current.cwd.path):starts_with(unmounted_url) then
 			ya.emit("cd", {
 				HOME,
 				tab = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,

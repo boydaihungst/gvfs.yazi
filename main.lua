@@ -1431,7 +1431,12 @@ local function mount_device(opts)
 	end
 	-- show notification after get max retry
 	if retries >= max_retry then
-		error(error_msg or (res and not res.status.success and res.stderr) or err or "Error: Unknown")
+		error(
+			tostring(error_msg or (res and not res.status.success and res.stderr) or err or "Error: Unknown"):gsub(
+				"%%",
+				"%%%%"
+			)
+		)
 		return false
 	end
 

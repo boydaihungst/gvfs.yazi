@@ -17,6 +17,61 @@ local PASS_TOOL = "pass"
 local SECRET_VAULT_VERSION = "1"
 local path_separator = package.config:sub(1, 1)
 
+-- Source: https://github.com/GNOME/gvfs/blob/master/po/
+local gvfs_error_msg_by_locale = {
+	require_password = {
+		"Authentication Required",
+		"Патрабуецца аўтэнтыфікацыя",
+		"Изисква се идентификация",
+		"Cal autenticació",
+		"Je vyžadováno ověření",
+		"Kræver godkendelse",
+		"Anmeldung erforderlich",
+		"Απαιτείται Πιστοποίηση",
+		"Aŭtentigo bezonata",
+		"Autenticación requerida",
+		"Autentifikazioa behar da",
+		"نیاز به تأیید هویت",
+		"Tunnistautuminen vaaditaan",
+		"Authentification requise",
+		"Autenticazion necessarie",
+		"Requírese autenticación",
+		"נדרש אימות",
+		"Potrebna je ovjera",
+		"Hitelesítés szükséges",
+		"Autentikasi Diperlukan",
+		"Richiesta autenticazione",
+		"認証が必要です",
+		"აუცილებელია ავთენტიკაცია",
+		"Asesteb yettwasra",
+		"Аутентификация қажет",
+		"인증이 필요합니다",
+		"Reikia patvirtinti tapatybę",
+		"Nepieciešama autentifikācija",
+		"Autentisering kreves",
+		"प्रमाणीकरण आवश्यक",
+		"Aanmelding vereist",
+		"Autentificacion requerida",
+		"ਪਰਮਾਣਕਿਤਾ ਚਾਹੀਦੀ ਹੈ",
+		"Wymagane jest uwierzytelnienie",
+		"Autenticação necessária",
+		"Autentificare necesară",
+		"Требуется аутентификация",
+		"Vyžaduje sa overenie totožnosti",
+		"Zahtevana je overitev.",
+		"Потребно је потврђивање идентитета",
+		"Potrebno je potvrđivanje identiteta",
+		"Autentisering krävs",
+		"ต้องยืนยันตัวตน",
+		"Kimlik Doğrulaması Gerekli",
+		"دەلىللەش زۆرۈر",
+		"Слід пройти розпізнавання",
+		"Cần phải xác thực",
+		"需要认证",
+		"需要核對",
+	},
+}
+
 ---@enum NOTIFY_MSG
 local NOTIFY_MSG = {
 	CANT_CREATE_SAVE_FOLDER = "Can't create save folder: %s",
@@ -924,6 +979,7 @@ local function get_gdrive_children_folder_info(parent_folder)
 					.. "/*",
 			})
 			:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+			:env("LC_ALL", "C")
 			:stderr(Command.PIPED)
 			:stdout(Command.PIPED)
 			:output()
@@ -1272,6 +1328,7 @@ local function mount_device(opts)
 				.. (device.uuid and ("-d " .. device.uuid) or path_quote(device.uri)),
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
+		:env("LC_ALL", "C")
 		:stderr(Command.PIPED)
 		:stdout(Command.PIPED)
 		:output()
@@ -1329,102 +1386,105 @@ local function mount_device(opts)
 		if res.stderr:match(".*is already mounted.*") then
 			return true
 		end
-		if res.stdout:find("Authentication Required") then
-			local stdout = res.stdout:match(".*Authentication Required(.*)") or ""
-			if stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
-				if retries < max_retry then
-					username, _ = show_input(
-						"Enter username "
-							.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
-							.. ":",
-						false,
-						username or stdout:match("User %[(.*)%]:") or ""
-					)
-					if username == nil then
-						return false
-					end
-				else
-					error_msg = string.format(
-						NOTIFY_MSG.MOUNT_ERROR_USERNAME,
-						(device.name or "NO_NAME") .. " (" .. (device.scheme or "UNKNOWN_SCHEME") .. ")"
-					)
-				end
-			end
-			if
-				stdout:find("\nDomain: \n")
-				or stdout:find("\nDomain %[.*%]: \n")
-				or stdout:find("\nUser: \n")
-				or stdout:find("\nUser %[.*%]: \n")
-			then
-				if retries < max_retry then
-					service_domain, _ = show_input(
-						"Enter Domain "
-							.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
-							.. ":",
-						false,
-						service_domain or stdout:match("Domain %[(.*)%]:") or "WORKGROUP"
-					)
-					if service_domain == nil then
-						return false
-					end
-				else
-					error_msg = string.format(
-						NOTIFY_MSG.MOUNT_ERROR_USERNAME,
-						(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
-					)
-				end
-			end
-			if
-				stdout:find("\nPassword: \n")
-				or stdout:find("\nUser: \n")
-				or stdout:find("\nUser %[.*%]: \n")
-				or stdout:find("\nDomain: \n")
-				or stdout:find("\nDomain %[.*%]: \n")
-			then
-				if username ~= opts.username or (username == nil and is_pw_saved == nil) then
-					-- Prevent showing gpg passphrase twice
-					if not skipped_secret_vault and not is_secret_vault_available(true) then
-						skipped_secret_vault = true
-					end
-					if not skipped_secret_vault then
-						if device.uuid then
-							-- case hard drive
-							password = lookup_password(device.scheme, device.uuid, device.uuid)
-						else
-							local scheme, domain, user, _, prefix, port, _service_domain =
-								extract_info_from_uri(device.uri)
-							password = lookup_password(
-								scheme,
-								username or user,
-								domain,
-								prefix,
-								port,
-								service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
-							)
-						end
-						is_pw_saved = password ~= nil
-						if is_pw_saved then
-							info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
-						end
-					end
-				end
-				if retries < max_retry then
-					if not is_pw_saved then
-						password, _ = show_input(
-							"Enter password "
+
+		for _, msg in ipairs(gvfs_error_msg_by_locale.require_password) do
+			if res.stdout:find(msg) then
+				local stdout = res.stdout:match(".*" .. msg .. "(.*)") or ""
+				if stdout:find("\nUser: \n") or stdout:find("\nUser %[.*%]: \n") then
+					if retries < max_retry then
+						username, _ = show_input(
+							"Enter username "
 								.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
 								.. ":",
-							true
+							false,
+							username or stdout:match("User %[(.*)%]:") or ""
 						)
-						if password == nil then
+						if username == nil then
 							return false
 						end
+					else
+						error_msg = string.format(
+							NOTIFY_MSG.MOUNT_ERROR_USERNAME,
+							(device.name or "NO_NAME") .. " (" .. (device.scheme or "UNKNOWN_SCHEME") .. ")"
+						)
 					end
-				else
-					error_msg = string.format(
-						NOTIFY_MSG.MOUNT_ERROR_PASSWORD,
-						(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
-					)
+				end
+				if
+					stdout:find("\nDomain: \n")
+					or stdout:find("\nDomain %[.*%]: \n")
+					or stdout:find("\nUser: \n")
+					or stdout:find("\nUser %[.*%]: \n")
+				then
+					if retries < max_retry then
+						service_domain, _ = show_input(
+							"Enter Domain "
+								.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
+								.. ":",
+							false,
+							service_domain or stdout:match("Domain %[(.*)%]:") or "WORKGROUP"
+						)
+						if service_domain == nil then
+							return false
+						end
+					else
+						error_msg = string.format(
+							NOTIFY_MSG.MOUNT_ERROR_USERNAME,
+							(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+						)
+					end
+				end
+				if
+					stdout:find("\nPassword: \n")
+					or stdout:find("\nUser: \n")
+					or stdout:find("\nUser %[.*%]: \n")
+					or stdout:find("\nDomain: \n")
+					or stdout:find("\nDomain %[.*%]: \n")
+				then
+					if username ~= opts.username or (username == nil and is_pw_saved == nil) then
+						-- Prevent showing gpg passphrase twice
+						if not skipped_secret_vault and not is_secret_vault_available(true) then
+							skipped_secret_vault = true
+						end
+						if not skipped_secret_vault then
+							if device.uuid then
+								-- case hard drive
+								password = lookup_password(device.scheme, device.uuid, device.uuid)
+							else
+								local scheme, domain, user, _, prefix, port, _service_domain =
+									extract_info_from_uri(device.uri)
+								password = lookup_password(
+									scheme,
+									username or user,
+									domain,
+									prefix,
+									port,
+									service_domain or (username or user or ""):match("^([^;]+);") or _service_domain
+								)
+							end
+							is_pw_saved = password ~= nil
+							if is_pw_saved then
+								info(NOTIFY_MSG.RETRIVE_PASSWORD_SUCCESS)
+							end
+						end
+					end
+					if retries < max_retry then
+						if not is_pw_saved then
+							password, _ = show_input(
+								"Enter password "
+									.. (device.name and ("(" .. device.name .. ")") or (device.uri and ("(" .. device.uri .. ")") or ""))
+									.. ":",
+								true
+							)
+							if password == nil then
+								return false
+							end
+						end
+					else
+						error_msg = string.format(
+							NOTIFY_MSG.MOUNT_ERROR_PASSWORD,
+							(device.name or "NO_NAME") .. " (" .. device.scheme .. ")"
+						)
+					end
 				end
 			end
 		end
@@ -2086,6 +2146,9 @@ local function add_or_edit_mount_action(is_edit)
 	end
 
 	mount.uri, _ = show_input("Enter mount URI:", false, mount.uri)
+	if mount.uri == nil then
+		return
+	end
 	mount.uri = mount.uri:gsub("^%s*(.-)%s*$", "%1")
 	if mount.uri == nil then
 		return

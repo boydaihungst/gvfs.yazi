@@ -1486,6 +1486,7 @@ local function mount_device(opts)
 						)
 					end
 				end
+				break
 			end
 		end
 	end

@@ -1826,7 +1826,7 @@ local save_tab_hovered = ya.sync(function()
 		local is_virtual = Url(tab.current.cwd).scheme and Url(tab.current.cwd).scheme.is_virtual
 		table.insert(hovered_item_per_tab, {
 			id = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,
-			cwd = tostring(is_virtual and tab.current.cwd or tab.current.cwd.path),
+			cwd = tostring((is_virtual and tab.current.cwd or tab.current.cwd.path) or tab.current.cwd),
 		})
 	end
 	return hovered_item_per_tab
@@ -1842,7 +1842,7 @@ local redirect_unmounted_tab_to_home = ya.sync(function(_, unmounted_url, notify
 	end
 	for _, tab in ipairs(cx.tabs) do
 		local is_virtual = Url(tab.current.cwd).scheme and Url(tab.current.cwd).scheme.is_virtual
-		if (is_virtual and tab.current.cwd or tab.current.cwd.path):starts_with(unmounted_url) then
+		if ((is_virtual and tab.current.cwd or tab.current.cwd.path) or tab.current.cwd):starts_with(unmounted_url) then
 			ya.emit("cd", {
 				HOME,
 				tab = (type(tab.id) == "number" or type(tab.id) == "string") and tab.id or tab.id.value,
@@ -1936,7 +1936,7 @@ end
 ---@param state_key STATE_KEY.CACHED_LOCAL_PATH_DEVICE|STATE_KEY.AUTOMOUNTS|string
 ---@param jump_location string?
 ---@param tab_id number?
-local function remount_keep_cwd_unchanged_action(state_key, jump_location, tab_id)
+local function remount_keep_cwd_unchanged_action(state_key, jump_location, tab_id, hide_cant_remount_message)
 	local cwd = jump_location or current_dir()
 	local root_mountpoint = get_state(STATE_KEY.ROOT_MOUNTPOINT)
 	if
@@ -1953,8 +1953,10 @@ local function remount_keep_cwd_unchanged_action(state_key, jump_location, tab_i
 		return
 	end
 	if is_mounted(current_tab_device) then
-		info(NOTIFY_MSG.CANT_REMOUNT_DEVICE, current_tab_device.name)
-		return
+		if not hide_cant_remount_message then
+			info(NOTIFY_MSG.CANT_REMOUNT_DEVICE, current_tab_device.name)
+		end
+		return current_tab_device
 	end
 	local tabs = save_tab_hovered()
 	local saved_matched_tabs = {}
@@ -2490,7 +2492,8 @@ function M:entry(job)
 		end
 		if cached_device then
 			-- Update cached device with new data
-			local new_cached_device = remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, subfolder_path, tab_id)
+			local new_cached_device =
+				remount_keep_cwd_unchanged_action(STATE_KEY.AUTOMOUNTS, subfolder_path, tab_id, true)
 			if new_cached_device then
 				cached_device = new_cached_device
 			end

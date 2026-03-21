@@ -70,7 +70,7 @@ polkit.addRule(function(action, subject) {
 - Add user to `plugdev` group. Then run `newgrp plugdev` or log out and log back in.
 
   ```bash
-  sudo usermod -a -G plugdev $(whoami)`
+  sudo usermod -a -G plugdev $(whoami)
   sudo newgrp plugdev
   ```
 

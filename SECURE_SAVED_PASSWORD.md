@@ -25,6 +25,10 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
 
   # Arch
   sudo pacman -S libsecret
+
+  # Gentoo
+  # https://wiki.gentoo.org/wiki/Project:GNOME/Gnome_Team_Ebuild_Policies#gnome-keyring_and_libsecret
+  sudo emerge -av app-crypt/libsecret
   ```
 
 - Install `GNOME-Keyring` (or KWallet):
@@ -43,6 +47,10 @@ If you need to use headless workaround (see [HEADLESS_WORKAROUND.md](./HEADLESS_
   # Arch
   sudo pacman -S gnome-keyring
   sudo systemctl enable --now --user gnome-keyring-daemon
+
+  # Gentoo
+  # https://wiki.gentoo.org/wiki/Project:GNOME/Gnome_Team_Ebuild_Policies#gnome-keyring_and_libsecret
+  sudo emerge -av gnome-base/gnome-keyring
   ```
 
   For other distros please ask gemini/chatgpt.
@@ -103,6 +111,9 @@ Can use on both GUI and headless session (non-active console, Like connect to a 
 
   # Arch
   sudo pacman -S pass gnupg
+
+  # Gentoo
+  sudo emerge -av app-crypt/gnupg app-admin/pass
   ```
 
   For other distros please ask gemini/chatgpt.

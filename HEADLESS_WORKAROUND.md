@@ -64,7 +64,12 @@ polkit.addRule(function(action, subject) {
 - Reload the polkit rules with this command:
 
   ```bash
+  # systemd:
   sudo systemctl restart polkit.service
+
+  # non-systemd, can directly run this command in you window manager
+  # like sway, hyprland, or init system like openrc:
+  /usr/libexec/polkit-gnome-authentication-agent-1
   ```
 
 - Add user to `plugdev` group. Then run `newgrp plugdev` or log out and log back in.

@@ -21,6 +21,15 @@ sudo dnf install gnome-online-accounts gnome-control-center gvfs-goa
 
 # Arch
 sudo pacman -S gnome-online-accounts gnome-control-center gvfs-goa
+
+# Gentoo
+# Edit /etc/portage/package.use/gvfs.conf again, add more USE flags:
+# https://wiki.gentoo.org/wiki/GVfs
+gnome-base/gvfs gnome-online-accounts
+# Depends on your distro, I disabled all of these USE flags, if you use gnome, you may need to remove them:
+gnome-base/gnome-control-center -bluetooth -cups -geolocation -ibus -networkmanager
+# Then run this to update gvfs:
+sudo emerge -av gnome-base/gvfs net-libs/gnome-online-accounts gnome-base/gnome-control-center
 ```
 
 ### Setup GOA

@@ -202,6 +202,9 @@ prepend_keymap = [
     #   -> Explain about the scheme:
     #       -> If it shows like this: {ftp,ftps,ftpis}://[user@]host[:port]
     #       -> All of the value within [] is optional. For values within {}, you must choose exactly one. All others are required.
+    #       -> empty [user] or "anonymous" user is anonymous user in (ftp)
+    #           -> ftp://anonymous@192.168.1.2:9999 -> skip user input step.
+    #           -> ftp://192.168.1.2:9999 -> input empty value in user input box.
     #       -> Example: {ftp,ftps,ftpis}://[user@]host[:port] => ip and port: "ftp://myusername@192.168.1.2:9999" or domain: "ftps://myusername@github.com"
     #       -> More examples: smb://user@192.168.1.2/share, smb://WORKGROUP;user@192.168.1.2/share, sftp://user@192.168.1.2/, ftp://192.168.1.2/
     # !WARNING: - Scheme/Mount URI shouldn't contain password.

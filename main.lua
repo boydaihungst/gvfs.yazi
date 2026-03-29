@@ -1245,7 +1245,7 @@ local function is_mounted(device)
 end
 
 ---mount device
----@param opts {device: Device, username?:string, password?: string, service_domain?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer}
+---@param opts {device: Device, username?:string, password?: string, service_domain?: string, is_pw_saved?: boolean, skipped_secret_vault?: boolean,max_retry?: integer, retries?: integer, anonymous?: boolean}
 ---@return boolean
 local function mount_device(opts)
 	local device = opts.device
@@ -1255,6 +1255,7 @@ local function mount_device(opts)
 	local is_pw_saved = opts.is_pw_saved
 	local skipped_secret_vault = opts.skipped_secret_vault
 	local username = opts.username
+	local anonymous = opts.anonymous
 	local service_domain = opts.service_domain
 	local error_msg = nil
 
@@ -1280,6 +1281,7 @@ local function mount_device(opts)
 			"-c",
 			(auth_string_format ~= "" and "printf " .. path_quote(auth_string_format) .. " " .. auths .. " | " or "")
 				.. " gio mount "
+				.. (anonymous and "-a " or "")
 				.. (device.uuid and ("-d " .. device.uuid) or path_quote(device.uri)),
 		})
 		:env("XDG_RUNTIME_DIR", XDG_RUNTIME_DIR)
@@ -1354,6 +1356,9 @@ local function mount_device(opts)
 				)
 				if username == nil then
 					return false
+				elseif username == "" then
+					-- Case using anonymous user
+					anonymous = true
 				end
 			else
 				error_msg = string.format(
@@ -1363,10 +1368,13 @@ local function mount_device(opts)
 			end
 		end
 		if
-			stdout:find("\nDomain: \n")
-			or stdout:find("\nDomain %[.*%]: \n")
-			or stdout:find("\nUser: \n")
-			or stdout:find("\nUser %[.*%]: \n")
+			(device.scheme == SCHEME.SMB or device.scheme == SCHEME.DNS_SD or device.scheme == SCHEME.DAVSD)
+			and (
+				stdout:find("\nDomain: \n")
+				or stdout:find("\nDomain %[.*%]: \n")
+				or stdout:find("\nUser: \n")
+				or stdout:find("\nUser %[.*%]: \n")
+			)
 		then
 			if retries < max_retry then
 				service_domain, _ = show_input(
@@ -1387,11 +1395,14 @@ local function mount_device(opts)
 			end
 		end
 		if
-			stdout:find("\nPassword: \n")
-			or stdout:find("\nUser: \n")
-			or stdout:find("\nUser %[.*%]: \n")
-			or stdout:find("\nDomain: \n")
-			or stdout:find("\nDomain %[.*%]: \n")
+			not anonymous
+			and (
+				stdout:find("Password: \n")
+				or stdout:find("\nUser: \n")
+				or stdout:find("\nUser %[.*%]: \n")
+				or stdout:find("\nDomain: \n")
+				or stdout:find("\nDomain %[.*%]: \n")
+			)
 		then
 			if username ~= opts.username or (username == nil and is_pw_saved == nil) then
 				-- Prevent showing gpg passphrase twice
@@ -1461,6 +1472,7 @@ local function mount_device(opts)
 		skipped_secret_vault = skipped_secret_vault,
 		username = username,
 		service_domain = service_domain,
+		anonymous = anonymous,
 	})
 end
 

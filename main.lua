@@ -1054,8 +1054,17 @@ local function parse_devices(raw_input)
 			end
 			current_mount = { name = mount_name or "", uri = mount_uri or "" }
 
+			local mount_base_uri = mount_uri:gsub("/+$", "")
+			local mount_uri_port = mount_base_uri:match(":%d+$")
 			for m = #predefined_mounts, 1, -1 do
-				if predefined_mounts[m].uri:gsub("/+$", "") == mount_uri:gsub("/+$", "") then
+				local predefined_mount_base_uri = predefined_mounts[m].uri:gsub("/+$", "")
+				if
+					predefined_mount_base_uri == mount_base_uri
+					or (
+						not mount_uri_port
+						and predefined_mount_base_uri:gsub(":%d+$", "") == mount_base_uri:gsub(":%d+$", "")
+					)
+				then
 					current_mount = table.remove(predefined_mounts, m)
 				end
 			end
@@ -1167,6 +1176,7 @@ local function parse_devices(raw_input)
 		m.mounts = { tbl_deep_clone(m) }
 		table.insert(volumes, m)
 	end
+
 	if #blacklist_devices > 0 then
 		for i = #volumes, 1, -1 do
 			local v = volumes[i]

@@ -1,5 +1,14 @@
 # gvfs.yazi
 
+> [!IMPORTANT]
+> This repository is deprecated  
+> This project is no longer actively maintained,  
+> and there will be no more updates to this repository.  
+> If you've made a fork or a newer, actively maintained version of this project,  
+> feel free to share it in the Issues page.  
+> This way, newcomers can easily find an up-to-date alternative.
+> Forks, improvements, and alternative implementations are always welcome!
+
 <!-- toc -->
 
 - [Preview](#preview)
@@ -46,7 +55,7 @@ https://github.com/user-attachments/assets/fb74a710-5f05-4bf4-b95f-10f40583c5a0
 
 ## Requirements
 
-1. [yazi >= 26.5.6](https://github.com/sxyazi/yazi)
+1. [yazi >= 26.5.6 and <= v26.9.1](https://github.com/sxyazi/yazi)
 
 2. This plugin only supports Linux, and requires having [GLib](https://github.com/GNOME/glib), [gvfs](https://gitlab.gnome.org/GNOME/gvfs) (need D-Bus Session)
 
